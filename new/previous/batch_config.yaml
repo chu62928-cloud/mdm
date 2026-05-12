@@ -1,0 +1,26 @@
+# scripts/batch_config.yaml
+# 批量对照实验扫描配置示例
+
+# 文本 prompt 列表（每个都会跑一遍所有 posture 组合）
+prompts:
+  - "a person is walking forward"
+  - "a person is standing still"
+  - "a person walks slowly"
+
+# 体态组合列表（每个组合内的体态会同时施加）
+posture_combinations:
+  - ["骨盆前倾"]
+  - ["膝超伸"]
+  - ["驼背"]
+  - ["头前伸"]
+  - ["骨盆前倾", "膝超伸"]      # 下交叉综合征典型表现
+  - ["驼背", "头前伸"]           # 上交叉综合征典型表现
+
+# 随机种子列表（每个 seed 都会跑一遍，用于评估稳定性）
+seeds: [42, 123, 2024]
+
+# Guidance 超参扫描（lr × lbfgs_steps 组合）
+guidance_configs:
+  - { lr: 0.05, steps: 5 }     # 默认配置
+  - { lr: 0.10, steps: 5 }     # 学习率加大
+  - { lr: 0.05, steps: 10 }    # 迭代次数加大
