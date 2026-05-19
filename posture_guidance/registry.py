@@ -104,6 +104,76 @@ def compute_hinge_loss(
 
 
 # ============================================================
+# 对称 Huber loss — 供 V6 闭环控制器使用
+# ============================================================
+
+def compute_huber_loss(
+    angle: torch.Tensor,        # (..., N) 当前角度（弧度或米）
+    target: float,               # 目标值
+    direction: str,              # greater_than | less_than | equal
+    tolerance: float,            # 软死区（Huber delta 默认值的参考）
+    mask: torch.Tensor,          # (..., N) 相位 mask
+    delta: float = 0.05,         # Huber 转折点（与 angle 同单位）
+) -> torch.Tensor:
+    """
+    Symmetric Huber loss — 给 V6 闭环 PID 控制器用的对称损失。
+
+    与 compute_hinge_loss 的关键差异：
+      hinge：到位后 L=0, grad=0 → controller 失明，无法感知过推
+      huber：永远 differentiable，过推时 grad 反转 → controller 能拉回
+
+    direction 语义：
+      "greater_than": 仍按"应当 > target"，但在 angle > target 时给一个反向小推
+                      L = huber(target − angle) when (target − angle) > 0
+                      L = 0.1 · huber(angle − target) when (angle − target) > 0   ← 弱反推
+      "less_than":    对称
+      "equal":        双边均推（V6 推荐）
+                      L = huber(angle − target)
+
+    Huber form (cushion = delta)：
+      |r| ≤ delta:  L = 0.5 · r² / delta
+      |r| > delta:  L = |r| − 0.5 · delta
+    梯度 ∈ [−1, +1]，远目标时不爆炸；近目标时平滑过零。
+
+    Ref:
+      - Huber 1964, "Robust Estimation of a Location Parameter", §3
+      - Bansal et al., CVPR 2024 §4.2 (training-free guidance 需 bounded-grad)
+    """
+    target_t = torch.tensor(target, device=angle.device, dtype=angle.dtype)
+    delta_t  = torch.tensor(delta,  device=angle.device, dtype=angle.dtype)
+
+    def _huber(r: torch.Tensor) -> torch.Tensor:
+        abs_r = r.abs()
+        quad  = 0.5 * (r ** 2) / delta_t
+        lin   = abs_r - 0.5 * delta_t
+        return torch.where(abs_r <= delta_t, quad, lin)
+
+    if direction == "equal":
+        r = angle - target_t
+        loss = _huber(r)
+    elif direction == "greater_than":
+        # 双侧但不对称：未达目标时全力推，过目标时弱反推（保留向上倾向）
+        r_down = target_t - angle              # 未达目标 → r_down > 0
+        r_up   = angle - target_t              # 过目标 → r_up > 0
+        loss_main = _huber(torch.clamp(r_down, min=0.0))    # 主推力
+        loss_back = 0.1 * _huber(torch.clamp(r_up, min=0.0))  # 弱回拉
+        loss = loss_main + loss_back
+    elif direction == "less_than":
+        r_up   = angle - target_t
+        r_down = target_t - angle
+        loss_main = _huber(torch.clamp(r_up, min=0.0))
+        loss_back = 0.1 * _huber(torch.clamp(r_down, min=0.0))
+        loss = loss_main + loss_back
+    else:
+        raise ValueError(f"Unknown direction: {direction}")
+
+    # 与 hinge 同样的 mask + 归一化
+    masked_loss = loss * mask
+    mask_sum = mask.sum().clamp(min=1.0)
+    return masked_loss.sum() / mask_sum
+
+
+# ============================================================
 # 体态注册表 ★ 阶段一手动注册的体态都在这里 ★
 # ============================================================
 

@@ -10,6 +10,7 @@ from .registry import (
     SCHEDULE_FUNCTIONS,
     LossSpec,
     compute_hinge_loss,
+    compute_huber_loss,
     resolve_instruction,
 )
 from .phase_detector import PhaseDetector, PHASE_FUNCTIONS
@@ -120,7 +121,13 @@ class PostureGuidance:
             "diagnostic": diagnostic,
         }
 
-    def compute_loss(self, q, t, T, temporal_smoothness_weight: float = 0.0):
+    def compute_loss(
+        self, q, t, T,
+        temporal_smoothness_weight: float = 0.0,
+        loss_form: str = "hinge",
+        huber_delta: float = 0.05,
+        huber_direction_override: str = None,
+    ):
         """
         兼容 diffusion 内部的调用接口。
 
@@ -128,13 +135,32 @@ class PostureGuidance:
             q: (B, N, J, 3) 或 (N, J, 3) 关节坐标
             t, T: 当前 / 总去噪步
             temporal_smoothness_weight:
-                λ_smooth ≥ 0. 在主 hinge loss 上叠加
+                λ_smooth ≥ 0. 在主 loss 上叠加
                   λ · mean(‖angle[k+1] − angle[k]‖²)
                 逐 spec 累加（每个 spec 自己的 angle_fn 算一次）。
                 设为 0（默认）则完全等价于 self(q, t, T)。
                 推荐范围 0.01–0.05 (rad²)。
+            loss_form:
+                "hinge" — 默认，走 __call__ 用 compute_hinge_loss（V1-V5 行为不变）
+                "huber" — 给 V6 闭环用，过目标时梯度反转能主动拉回
+            huber_delta:
+                Huber 转折点（与 angle 单位一致，rad 或 m）。默认 0.05 rad ≈ 2.9°。
+            huber_direction_override:
+                若指定（"equal" / "greater_than" / "less_than"），则强制覆盖每个
+                spec.direction 使用此方向。V6 默认走 "equal"（双边推），
+                因为闭环 PID 必须有过推拉回信号。设 None 则尊重 spec.direction。
         """
-        loss = self(q, t, T)
+        if loss_form == "hinge":
+            loss = self(q, t, T)
+        elif loss_form == "huber":
+            loss = self._compute_total_huber(
+                q, t, T,
+                huber_delta=huber_delta,
+                direction_override=huber_direction_override,
+            )
+        else:
+            raise ValueError(f"Unknown loss_form: {loss_form}")
+
         if temporal_smoothness_weight <= 0.0:
             return loss
 
@@ -150,3 +176,57 @@ class PostureGuidance:
             diff = angle[..., 1:] - angle[..., :-1]
             smooth = smooth + (diff ** 2).mean()
         return loss + temporal_smoothness_weight * smooth
+
+    def _compute_total_huber(
+        self, q, t, T,
+        huber_delta: float = 0.05,
+        direction_override: str = None,
+    ):
+        """
+        与 __call__ 同样的 spec/schedule/mask/单位转换逻辑，
+        把内层 compute_hinge_loss 换成 compute_huber_loss。
+        给 V6 闭环 PID 使用。
+        """
+        total_loss = torch.zeros((), device=q.device, dtype=q.dtype)
+
+        for spec in self.specs:
+            schedule_w = SCHEDULE_FUNCTIONS[spec.schedule](t, T)
+            if schedule_w == 0.0:
+                continue
+
+            angle = spec.angle_fn(q, **spec.angle_fn_kwargs)
+
+            mask = PHASE_FUNCTIONS[spec.phase](self.detector, q)
+            if mask.dim() < angle.dim():
+                while mask.dim() < angle.dim():
+                    mask = mask.unsqueeze(-1)
+            elif mask.dim() > angle.dim():
+                mask = mask.squeeze(-1)
+
+            if spec.unit == "deg":
+                target_val = spec.target_deg * math.pi / 180.0
+                tol_val    = spec.tolerance_deg * math.pi / 180.0
+            else:
+                target_val = spec.target_deg
+                tol_val    = spec.tolerance_deg
+
+            direction = direction_override if direction_override else spec.direction
+
+            loss_val = compute_huber_loss(
+                angle=angle,
+                target=target_val,
+                direction=direction,
+                tolerance=tol_val,
+                mask=mask,
+                delta=huber_delta,
+            )
+
+            weighted = self.global_scale * spec.base_weight * schedule_w * loss_val
+            total_loss = total_loss + weighted
+
+            if self.verbose:
+                print(f"  [{spec.name}] (huber dir={direction}) "
+                      f"angle_mean={angle.mean().item():.4f}, "
+                      f"loss={loss_val.item():.6f}, weight={weighted.item():.6f}")
+
+        return total_loss

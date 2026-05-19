@@ -773,9 +773,10 @@ class GaussianDiffusion:
             )
 
         elif variant_name == "v6_closed_loop":
-            # Step 2+3: PID closed-loop + manifold projection
+            # Step 2+3: PID closed-loop + manifold projection + huber loss
             mu_new = self._guidance_v6_closed_loop(
-                mu_t=mu_t, x_t=x_t, t_int=t_int, t_tensor=t_tensor, T=T_total,
+                mu_t=mu_t, x_t=x_t, pred_xstart=pred_xstart,
+                t_int=t_int, t_tensor=t_tensor, T=T_total,
                 model=model, model_kwargs=model_kwargs,
                 fk_fn=posture_fk_fn,
                 guidance=guidance,
@@ -1182,11 +1183,11 @@ class GaussianDiffusion:
     # 解决跨 seed 不稳定的核心方案
     # ------------------------------------------------------------
     def _guidance_v6_closed_loop(
-        self, *, mu_t, x_t, t_int, t_tensor, T,
+        self, *, mu_t, x_t, pred_xstart, t_int, t_tensor, T,
         model, model_kwargs, fk_fn, guidance, guidance_loss_fn,
         # PID gains
-        Kp=30.0, Ki=1.0, Kd=5.0,
-        s_min=5.0, s_max=120.0, I_max=20.0,
+        Kp=50.0, Ki=1.0, Kd=5.0,
+        s_min=0.5, s_max=120.0, I_max=20.0,
         # smoothing
         beta_ema=0.8,
         # anti-windup
@@ -1196,6 +1197,12 @@ class GaussianDiffusion:
         # manifold projection (Step 3)
         manifold_project=True,
         manifold_alpha=1.0,
+        # ---- 迭代 2 新增：对称损失 + 容差带停推 ----
+        loss_form="huber",                  # "huber" | "hinge"
+        huber_delta=0.05,                   # rad
+        huber_direction="equal",            # 强制 V6 走双边
+        band_gate=True,                     # |err| < tol*factor 时直接 return mu_t
+        band_gate_factor=1.0,
         # schedule and base scale
         schedule="always",
         base_weight=1.0,
@@ -1207,18 +1214,25 @@ class GaussianDiffusion:
         verbose=True,
     ):
         """
-        Step 2 + Step 3 核心实现。
+        Step 2 + Step 3 核心实现（迭代 2，已修复 hinge-blind 问题）。
 
         每步去噪：
-          1. 跑一次 DPS forward 拿 x0_hat 和 ∇L
+          1. 跑一次 DPS forward 拿 x0_hat 和 ∇L (Huber loss)
           2. 测量 angle_now，算 err = target − angle_now
-          3. PID controller → 给出 s_t（含时间步衰减、anti-windup、EMA）
-          4. （可选）manifold orthogonal projection 修正 grad 方向
-          5. mu_t_new = mu_t − s_t · grad / ‖grad‖
+          3. (band-gate) |err| < tol → return mu_t 直接（保 corr，避免噪声注入）
+          4. PID controller → 给出 s_t（含时间步衰减、anti-windup、EMA）
+          5. （可选）manifold orthogonal projection 修正 grad 方向
+          6. mu_t_new = mu_t − s_t · grad / ‖grad‖
+
+        关键差异 vs 迭代 1：
+          - 默认 Huber loss（loss_form="huber" + huber_direction="equal"）
+            → 过推时 grad 方向反转，能主动拉回（hinge 在此处 grad=0 致命）
+          - 默认 s_min=0.5（原 5.0 一直顶住 PID 输出，让控制器形同虚设）
+          - 默认 Kp=50（提供更大早期驱动力，配合 s_min 下降）
+          - band_gate 用 err 信号而非 loss 信号判定收敛
+          - 删除旧的 `loss.item()==0.0` 早退（lambda_smooth>0 时该判定恒不触发）
 
         TODO（next iter）: 检测 cos_sim(x0_hat, prev_x0_hat) 触发 time-travel。
-        当前实现是 Step 3 第一道防线（projection）+ Step 2 全套，
-        FreeDoM 第二道防线作为 follow-up commit 加。
         """
         from posture_guidance.closed_loop_controller import (
             ClosedLoopController, orthogonal_project,
@@ -1236,17 +1250,36 @@ class GaussianDiffusion:
             )
         ctrl = guidance._v6_ctrl
 
-        # ---- 2. 推断 target（rad，若 spec 是 deg）----
+        # ---- 2. 推断 target 和 tolerance（rad，若 spec 是 deg）----
+        if len(guidance.specs) == 0:
+            return mu_t
+        spec0 = guidance.specs[0]
         if target_value is None:
-            if len(guidance.specs) == 0:
-                return mu_t
-            spec = guidance.specs[0]
-            if spec.unit == "deg":
-                target_value = spec.target_deg * math.pi / 180.0
+            if spec0.unit == "deg":
+                target_value = spec0.target_deg * math.pi / 180.0
             else:
-                target_value = spec.target_deg
+                target_value = spec0.target_deg
+        if spec0.unit == "deg":
+            tol_rad = spec0.tolerance_deg * math.pi / 180.0
+        else:
+            tol_rad = spec0.tolerance_deg
 
-        # ---- 3. DPS forward：算 grad + 拿到 x0_hat 和 angle_now ----
+        # ---- 3. 廉价预测当前 angle（用 dispatcher 已算好的 pred_xstart）做 band-gate ----
+        # pred_xstart 是主循环 p_sample 已经算出的 MDM x0_hat 预测，零额外成本
+        # fk_fn 是纯 tensor 运算，无梯度也能跑
+        if band_gate:
+            with th.no_grad():
+                q_pre = fk_fn(pred_xstart)
+                angle_pre = spec0.angle_fn(q_pre, **spec0.angle_fn_kwargs)
+                a_pre = angle_pre.mean()
+                err_pre = float(target_value - a_pre.item())
+                if abs(err_pre) < tol_rad * band_gate_factor:
+                    if verbose:
+                        print(f"[V6 t={t_int:3d}] BAND-GATE skip "
+                              f"(|err|={abs(err_pre):.4f} < tol={tol_rad*band_gate_factor:.4f})")
+                    return mu_t
+
+        # ---- 4. DPS forward：算 grad + 拿到 x0_hat 和 angle_now ----
         with th.enable_grad():
             x_t_var = x_t.detach().clone().contiguous().requires_grad_(True)
             model_output = model(x_t_var, self._scale_timesteps(t_tensor), **model_kwargs)
@@ -1269,27 +1302,26 @@ class GaussianDiffusion:
             if q.grad_fn is None:
                 return mu_t
 
-            # 主 hinge loss + 时域平滑（对策 B2）
-            # anchor 保证 grad_fn 不为 None（与 dispatcher 闭包一致）
+            # 主 loss + 时域平滑。loss_form="huber" → 过推时 grad 反转可拉回
             anchor = q.sum() * 0.0
             loss = base_weight * guidance.compute_loss(
                 q, t_int, T,
                 temporal_smoothness_weight=lambda_smooth,
+                loss_form=loss_form,
+                huber_delta=huber_delta,
+                huber_direction_override=huber_direction if loss_form == "huber" else None,
             ) + anchor
             if loss.grad_fn is None:
                 return mu_t
-            # 注意：当 lambda_smooth>0 且主 hinge=0 时，loss 仍可能 > 0
-            # 但若整体 loss=0（罕见），跳过这步
-            if loss.item() == 0.0:
-                return mu_t
+            # 旧的 `loss.item()==0.0` 早退已删除：
+            # - Huber 永远 differentiable，loss 不会真为 0
+            # - band_gate 已在更上游用 err 信号做了清晰的收敛判定
 
             grad = th.autograd.grad(loss, x_t_var, retain_graph=True)[0]
 
             # 同时读出当前 angle 均值（不需要梯度回传）
             with th.no_grad():
-                spec = guidance.specs[0]
-                angle = spec.angle_fn(q, **spec.angle_fn_kwargs)
-                # angle: (B, N) or (N,) — 求时间维均值 → (B,) or scalar
+                angle = spec0.angle_fn(q, **spec0.angle_fn_kwargs)
                 if angle.dim() >= 2:
                     a_now = angle.mean(dim=tuple(range(1, angle.dim())))
                 else:
