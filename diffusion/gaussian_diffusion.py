@@ -762,6 +762,27 @@ class GaussianDiffusion:
                 **variant_kwargs,
             )
 
+        elif variant_name == "v2_dps_norm":
+            # Step 1: gradient-normalized DPS — s 解耦于 ‖∇L‖
+            mu_new = self._guidance_v2_dps_norm(
+                mu_t=mu_t, x_t=x_t, t_int=t_int, t_tensor=t_tensor, T=T_total,
+                model=model, model_kwargs=model_kwargs,
+                fk_fn=posture_fk_fn,
+                guidance_loss_fn=guidance_loss_fn,
+                **variant_kwargs,
+            )
+
+        elif variant_name == "v6_closed_loop":
+            # Step 2+3: PID closed-loop + manifold projection
+            mu_new = self._guidance_v6_closed_loop(
+                mu_t=mu_t, x_t=x_t, t_int=t_int, t_tensor=t_tensor, T=T_total,
+                model=model, model_kwargs=model_kwargs,
+                fk_fn=posture_fk_fn,
+                guidance=guidance,
+                guidance_loss_fn=guidance_loss_fn,
+                **variant_kwargs,
+            )
+
         else:
             print(f"[WARN] unknown variant '{variant_name}', falling back to v1_mu_sgd")
             mu_new = self._guidance_v1_mu_sgd(
@@ -1085,6 +1106,227 @@ class GaussianDiffusion:
 
         mu_t_new = mu_t.detach() - s * grad_mean
         return mu_t_new
+
+    # ------------------------------------------------------------
+    # V2-norm — DPS with per-batch gradient normalization
+    # 解决跨 seed 不稳定的第一层修复：step = s · ∇L / ‖∇L‖
+    # ------------------------------------------------------------
+    def _guidance_v2_dps_norm(
+        self, *, mu_t, x_t, t_int, t_tensor, T,
+        model, model_kwargs, fk_fn, guidance_loss_fn,
+        s=2.0, schedule="always", base_weight=1.0,
+        grad_clip_norm=None,
+    ):
+        """
+        Step 1: gradient-normalized DPS.
+
+        与 V2 (_guidance_v2_dps) 的唯一区别：
+            V2:       mu_t_new = mu_t - s * grad
+            V2-norm:  mu_t_new = mu_t - s * grad / ‖grad‖_2 (per-batch)
+
+        参数 s 的语义从 V2 的"梯度乘子（依赖 ‖∇L‖ 量级）"
+        变成"单位方向上的推动距离"，跨 seed 等效推力一致。
+
+        典型范围 s ∈ [1, 5]（V2 的 s ∈ [30, 80] 已不再适用）。
+
+        Ref: Chung et al. ICLR 2023, eq. 16.
+        """
+        if not _schedule_active(schedule, t_int, T):
+            return mu_t
+
+        with th.enable_grad():
+            x_t_var = x_t.detach().clone().contiguous().requires_grad_(True)
+            model_output = model(x_t_var, self._scale_timesteps(t_tensor), **model_kwargs)
+            if model_output.grad_fn is None:
+                if hasattr(model, "model"):
+                    model_output = model.model(
+                        x_t_var, self._scale_timesteps(t_tensor), **model_kwargs
+                    )
+                if model_output.grad_fn is None:
+                    return mu_t
+
+            if self.model_mean_type == ModelMeanType.START_X:
+                x0_hat = model_output
+            elif self.model_mean_type == ModelMeanType.EPSILON:
+                x0_hat = self._predict_xstart_from_eps(x_t_var, t_tensor, model_output)
+            else:
+                return mu_t
+
+            q = fk_fn(x0_hat)
+            if q.grad_fn is None:
+                return mu_t
+            loss = base_weight * guidance_loss_fn(q, t_int, T)
+            if loss.grad_fn is None or loss.item() == 0.0:
+                return mu_t
+            grad = th.autograd.grad(loss, x_t_var)[0]
+
+        grad = grad.detach()
+        # per-batch L2 归一化（不是全局，否则跨 batch 元素互相耦合）
+        gn = grad.flatten(1).norm(dim=1).clamp_min(1e-8)
+        gn_shape = [gn.shape[0]] + [1] * (grad.dim() - 1)
+        grad_unit = grad / gn.view(*gn_shape)
+
+        if grad_clip_norm is not None:
+            # 可选的总范数 clip（safety net）
+            total = grad_unit.flatten(1).norm(dim=1).clamp_min(1e-8)
+            scale = (grad_clip_norm / total).clamp_max(1.0)
+            grad_unit = grad_unit * scale.view(*gn_shape)
+
+        print(f"[V2-norm UPDATE t={t_int:3d}] loss={loss.item():.4f}  "
+              f"raw_gn={gn.mean().item():.5f}  s={s}")
+
+        return mu_t.detach() - s * grad_unit
+
+    # ------------------------------------------------------------
+    # V6 — Closed-loop PID + manifold projection
+    # 解决跨 seed 不稳定的核心方案
+    # ------------------------------------------------------------
+    def _guidance_v6_closed_loop(
+        self, *, mu_t, x_t, t_int, t_tensor, T,
+        model, model_kwargs, fk_fn, guidance, guidance_loss_fn,
+        # PID gains
+        Kp=30.0, Ki=1.0, Kd=5.0,
+        s_min=5.0, s_max=120.0, I_max=20.0,
+        # smoothing
+        beta_ema=0.8,
+        # anti-windup
+        i_start_frac=0.5,
+        # temporal smoothness term on the loss (motion-dim regularizer)
+        lambda_smooth=0.02,
+        # manifold projection (Step 3)
+        manifold_project=True,
+        manifold_alpha=1.0,
+        # schedule and base scale
+        schedule="always",
+        base_weight=1.0,
+        # target — 自动从 guidance 第一个 spec 推断；外部可显式传入覆盖
+        target_value=None,
+        target_unit=None,         # "deg" or other (None → 从 spec 读)
+        angle_to_err_scale=1.0,
+        # diagnostic
+        verbose=True,
+    ):
+        """
+        Step 2 + Step 3 核心实现。
+
+        每步去噪：
+          1. 跑一次 DPS forward 拿 x0_hat 和 ∇L
+          2. 测量 angle_now，算 err = target − angle_now
+          3. PID controller → 给出 s_t（含时间步衰减、anti-windup、EMA）
+          4. （可选）manifold orthogonal projection 修正 grad 方向
+          5. mu_t_new = mu_t − s_t · grad / ‖grad‖
+
+        TODO（next iter）: 检测 cos_sim(x0_hat, prev_x0_hat) 触发 time-travel。
+        当前实现是 Step 3 第一道防线（projection）+ Step 2 全套，
+        FreeDoM 第二道防线作为 follow-up commit 加。
+        """
+        from posture_guidance.closed_loop_controller import (
+            ClosedLoopController, orthogonal_project,
+        )
+
+        if not _schedule_active(schedule, t_int, T):
+            return mu_t
+
+        # ---- 1. lazy-init controller in guidance object ----
+        if not hasattr(guidance, "_v6_ctrl") or guidance._v6_ctrl is None:
+            guidance._v6_ctrl = ClosedLoopController(
+                Kp=Kp, Ki=Ki, Kd=Kd,
+                s_min=s_min, s_max=s_max, I_max=I_max,
+                beta_ema=beta_ema, i_start_frac=i_start_frac,
+            )
+        ctrl = guidance._v6_ctrl
+
+        # ---- 2. 推断 target（rad，若 spec 是 deg）----
+        if target_value is None:
+            if len(guidance.specs) == 0:
+                return mu_t
+            spec = guidance.specs[0]
+            if spec.unit == "deg":
+                target_value = spec.target_deg * math.pi / 180.0
+            else:
+                target_value = spec.target_deg
+
+        # ---- 3. DPS forward：算 grad + 拿到 x0_hat 和 angle_now ----
+        with th.enable_grad():
+            x_t_var = x_t.detach().clone().contiguous().requires_grad_(True)
+            model_output = model(x_t_var, self._scale_timesteps(t_tensor), **model_kwargs)
+            if model_output.grad_fn is None:
+                if hasattr(model, "model"):
+                    model_output = model.model(
+                        x_t_var, self._scale_timesteps(t_tensor), **model_kwargs
+                    )
+                if model_output.grad_fn is None:
+                    return mu_t
+
+            if self.model_mean_type == ModelMeanType.START_X:
+                x0_hat = model_output
+            elif self.model_mean_type == ModelMeanType.EPSILON:
+                x0_hat = self._predict_xstart_from_eps(x_t_var, t_tensor, model_output)
+            else:
+                return mu_t
+
+            q = fk_fn(x0_hat)
+            if q.grad_fn is None:
+                return mu_t
+
+            # 主 hinge loss + 时域平滑（对策 B2）
+            # anchor 保证 grad_fn 不为 None（与 dispatcher 闭包一致）
+            anchor = q.sum() * 0.0
+            loss = base_weight * guidance.compute_loss(
+                q, t_int, T,
+                temporal_smoothness_weight=lambda_smooth,
+            ) + anchor
+            if loss.grad_fn is None:
+                return mu_t
+            # 注意：当 lambda_smooth>0 且主 hinge=0 时，loss 仍可能 > 0
+            # 但若整体 loss=0（罕见），跳过这步
+            if loss.item() == 0.0:
+                return mu_t
+
+            grad = th.autograd.grad(loss, x_t_var, retain_graph=True)[0]
+
+            # 同时读出当前 angle 均值（不需要梯度回传）
+            with th.no_grad():
+                spec = guidance.specs[0]
+                angle = spec.angle_fn(q, **spec.angle_fn_kwargs)
+                # angle: (B, N) or (N,) — 求时间维均值 → (B,) or scalar
+                if angle.dim() >= 2:
+                    a_now = angle.mean(dim=tuple(range(1, angle.dim())))
+                else:
+                    a_now = angle.mean().unsqueeze(0)
+
+        grad = grad.detach()
+        x0_hat = x0_hat.detach()
+
+        # ---- 4. PID controller → s_t ----
+        # err 形状要和 grad 的 batch 维匹配
+        B = grad.shape[0]
+        if a_now.shape[0] != B:
+            a_now = a_now.expand(B)
+        err = (target_value - a_now) * angle_to_err_scale          # (B,)
+        sigma_t = float(self.posterior_variance[t_int]) ** 0.5
+        s_t = ctrl.update(err=err, sigma_t=sigma_t, t_int=t_int, T=T)   # (B,)
+
+        # ---- 5. (Step 3) manifold orthogonal projection ----
+        if manifold_project:
+            grad = orthogonal_project(grad, x0_hat, alpha=manifold_alpha)
+
+        # ---- 6. per-batch normalize 后乘 s_t ----
+        gn = grad.flatten(1).norm(dim=1).clamp_min(1e-8)            # (B,)
+        gn_shape = [B] + [1] * (grad.dim() - 1)
+        grad_unit = grad / gn.view(*gn_shape)
+        delta = s_t.view(*gn_shape) * grad_unit
+
+        if verbose:
+            print(
+                f"[V6 t={t_int:3d}] err={err.mean().item():+.4f}rad "
+                f"sigma={sigma_t:.4f} s_t={s_t.mean().item():.3f} "
+                f"loss={loss.item():.4f} grad_norm={gn.mean().item():.5f} "
+                f"|Δμ|={delta.norm().item():.4f}"
+                f"{' (proj)' if manifold_project else ''}"
+            )
+
+        return mu_t.detach() - delta
 
     # ============================================================
     # DDIM sampling (unchanged)
