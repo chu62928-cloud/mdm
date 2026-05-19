@@ -120,6 +120,33 @@ class PostureGuidance:
             "diagnostic": diagnostic,
         }
 
-    def compute_loss(self, q, t, T):
-        """兼容 diffusion 内部的调用接口"""
-        return self(q, t, T)
+    def compute_loss(self, q, t, T, temporal_smoothness_weight: float = 0.0):
+        """
+        兼容 diffusion 内部的调用接口。
+
+        Args:
+            q: (B, N, J, 3) 或 (N, J, 3) 关节坐标
+            t, T: 当前 / 总去噪步
+            temporal_smoothness_weight:
+                λ_smooth ≥ 0. 在主 hinge loss 上叠加
+                  λ · mean(‖angle[k+1] − angle[k]‖²)
+                逐 spec 累加（每个 spec 自己的 angle_fn 算一次）。
+                设为 0（默认）则完全等价于 self(q, t, T)。
+                推荐范围 0.01–0.05 (rad²)。
+        """
+        loss = self(q, t, T)
+        if temporal_smoothness_weight <= 0.0:
+            return loss
+
+        smooth = torch.zeros((), device=q.device, dtype=q.dtype)
+        for spec in self.specs:
+            schedule_w = SCHEDULE_FUNCTIONS[spec.schedule](t, T)
+            if schedule_w == 0.0:
+                continue
+            angle = spec.angle_fn(q, **spec.angle_fn_kwargs)
+            # angle 可能是 (B, N) 或 (N,)；取最后一维做一阶差分
+            if angle.dim() == 0:
+                continue
+            diff = angle[..., 1:] - angle[..., :-1]
+            smooth = smooth + (diff ** 2).mean()
+        return loss + temporal_smoothness_weight * smooth
