@@ -54,12 +54,14 @@ class PostureGuidance:
         q: torch.Tensor,
         t: int,
         T: int,
+        spec_schedule_override: str = None,
     ) -> torch.Tensor:
         """
         Args:
             q: (B, N, J, 3) 或 (N, J, 3) 全局关节坐标，要求保持梯度
             t: 当前去噪步索引
             T: 总去噪步数
+            spec_schedule_override: 若非 None，强制覆盖每个 spec.schedule（V6 用）
         Returns:
             total_loss: 标量 tensor
         """
@@ -67,7 +69,8 @@ class PostureGuidance:
 
         for spec in self.specs:
             # 1. 时间调度：判断是否在当前 t 激活
-            schedule_w = SCHEDULE_FUNCTIONS[spec.schedule](t, T)
+            spec_schedule = spec_schedule_override if spec_schedule_override else spec.schedule
+            schedule_w = SCHEDULE_FUNCTIONS[spec_schedule](t, T)
             if schedule_w == 0.0:
                 continue
 
@@ -127,6 +130,7 @@ class PostureGuidance:
         loss_form: str = "hinge",
         huber_delta: float = 0.05,
         huber_direction_override: str = None,
+        spec_schedule_override: str = None,
     ):
         """
         兼容 diffusion 内部的调用接口。
@@ -149,14 +153,20 @@ class PostureGuidance:
                 若指定（"equal" / "greater_than" / "less_than"），则强制覆盖每个
                 spec.direction 使用此方向。V6 默认走 "equal"（双边推），
                 因为闭环 PID 必须有过推拉回信号。设 None 则尊重 spec.direction。
+            spec_schedule_override:
+                若指定（"always" / "last_quarter" / ...），则强制覆盖每个
+                spec.schedule。V6 推荐设 "always"，让控制器在全部去噪步都有梯度信号
+                （c_t 时间步衰减自带早期软系数，不需要 spec schedule 二次 mask）。
+                None 则尊重 spec.schedule（V1-V5 默认）。
         """
         if loss_form == "hinge":
-            loss = self(q, t, T)
+            loss = self(q, t, T, spec_schedule_override=spec_schedule_override)
         elif loss_form == "huber":
             loss = self._compute_total_huber(
                 q, t, T,
                 huber_delta=huber_delta,
                 direction_override=huber_direction_override,
+                spec_schedule_override=spec_schedule_override,
             )
         else:
             raise ValueError(f"Unknown loss_form: {loss_form}")
@@ -166,7 +176,8 @@ class PostureGuidance:
 
         smooth = torch.zeros((), device=q.device, dtype=q.dtype)
         for spec in self.specs:
-            schedule_w = SCHEDULE_FUNCTIONS[spec.schedule](t, T)
+            spec_schedule = spec_schedule_override if spec_schedule_override else spec.schedule
+            schedule_w = SCHEDULE_FUNCTIONS[spec_schedule](t, T)
             if schedule_w == 0.0:
                 continue
             angle = spec.angle_fn(q, **spec.angle_fn_kwargs)
@@ -181,16 +192,20 @@ class PostureGuidance:
         self, q, t, T,
         huber_delta: float = 0.05,
         direction_override: str = None,
+        spec_schedule_override: str = None,
     ):
         """
         与 __call__ 同样的 spec/schedule/mask/单位转换逻辑，
         把内层 compute_hinge_loss 换成 compute_huber_loss。
         给 V6 闭环 PID 使用。
+
+        spec_schedule_override: 若非 None，则强制每个 spec 走该 schedule（V6 推荐 "always"）。
         """
         total_loss = torch.zeros((), device=q.device, dtype=q.dtype)
 
         for spec in self.specs:
-            schedule_w = SCHEDULE_FUNCTIONS[spec.schedule](t, T)
+            spec_schedule = spec_schedule_override if spec_schedule_override else spec.schedule
+            schedule_w = SCHEDULE_FUNCTIONS[spec_schedule](t, T)
             if schedule_w == 0.0:
                 continue
 

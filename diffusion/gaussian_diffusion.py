@@ -1201,6 +1201,11 @@ class GaussianDiffusion:
         loss_form="huber",                  # "huber" | "hinge"
         huber_delta=0.05,                   # rad
         huber_direction="equal",            # 强制 V6 走双边
+        # ---- 迭代 4：spec schedule 覆盖 ----
+        # spec 注册的 last_quarter 会把 V6 的早期 5 步全 mask 掉（loss=0, grad=0）
+        # PID 的 c_t 时间步衰减已经自带早期软系数，spec schedule 二次 mask 多余
+        # 默认 "always" 让控制器在全部去噪步都有梯度信号
+        spec_schedule_override="always",
         # ---- 迭代 3 关键变更 ----
         # 默认不归一化梯度 + 默认关闭 band_gate
         # Huber loss 的 grad 自带衰减（远目标=1，近目标→0），归一化反而破坏自调节
@@ -1320,6 +1325,7 @@ class GaussianDiffusion:
                 loss_form=loss_form,
                 huber_delta=huber_delta,
                 huber_direction_override=huber_direction if loss_form == "huber" else None,
+                spec_schedule_override=spec_schedule_override,
             ) + anchor
             if loss.grad_fn is None:
                 return mu_t

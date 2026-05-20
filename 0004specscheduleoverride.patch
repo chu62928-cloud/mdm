@@ -1,0 +1,154 @@
+From 3d21aaff98cc5152572878f1692fee60f04cc2c3 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 20 May 2026 03:28:59 +0000
+Subject: [PATCH] =?UTF-8?q?V6=20=E8=BF=AD=E4=BB=A3=204=EF=BC=9Aspec=5Fsche?=
+ =?UTF-8?q?dule=5Foverride=EF=BC=8C=E8=AE=A9=E6=8E=A7=E5=88=B6=E5=99=A8?=
+ =?UTF-8?q?=E5=85=A8=E7=A8=8B=E5=BC=95=E5=AF=BC?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+迭代 3 实测 corr=0.351 已经追平 v2_dps_norm_s2，但日志显示
+早期 5 步 (t=17~13) loss=0、grad=0、|Δμ|=0 — spec "骨盆前倾"
+schedule="last_quarter" 把这些步全 mask 掉了。
+
+V6 设计意图是"全程连续柔性引导"，PID 的 c_t 时间步衰减
+增益本来就负责早期软系数。spec schedule 二次 mask 反而让
+V6 退化成"只有 13 步窗口"。
+
+修复：
+- controller.py:
+  - compute_loss / __call__ / _compute_total_huber 都加 spec_schedule_override
+  - 非 None 时强制覆盖每个 spec.schedule
+  - temporal_smoothness 项的 schedule 检查也用 override（一致性）
+- gaussian_diffusion.py:
+  - _guidance_v6_closed_loop 默认 spec_schedule_override="always"
+  - 透传给 guidance.compute_loss
+
+V1-V5 不传该参数 → 默认 None → 完全保持原行为。
+
+预期：corr 从 0.351 → 0.40+，CV(corr) 从 34% → < 28%
+代价：每 sample 多 5 步 MDM forward (~+30% sweep 时间)
+---
+ diffusion/gaussian_diffusion.py |  6 ++++++
+ posture_guidance/controller.py  | 23 +++++++++++++++++++----
+ 2 files changed, 25 insertions(+), 4 deletions(-)
+
+diff --git a/diffusion/gaussian_diffusion.py b/diffusion/gaussian_diffusion.py
+index b3ccc9d..8aca1f7 100644
+--- a/diffusion/gaussian_diffusion.py
++++ b/diffusion/gaussian_diffusion.py
+@@ -1201,6 +1201,11 @@ class GaussianDiffusion:
+         loss_form="huber",                  # "huber" | "hinge"
+         huber_delta=0.05,                   # rad
+         huber_direction="equal",            # 强制 V6 走双边
++        # ---- 迭代 4：spec schedule 覆盖 ----
++        # spec 注册的 last_quarter 会把 V6 的早期 5 步全 mask 掉（loss=0, grad=0）
++        # PID 的 c_t 时间步衰减已经自带早期软系数，spec schedule 二次 mask 多余
++        # 默认 "always" 让控制器在全部去噪步都有梯度信号
++        spec_schedule_override="always",
+         # ---- 迭代 3 关键变更 ----
+         # 默认不归一化梯度 + 默认关闭 band_gate
+         # Huber loss 的 grad 自带衰减（远目标=1，近目标→0），归一化反而破坏自调节
+@@ -1320,6 +1325,7 @@ class GaussianDiffusion:
+                 loss_form=loss_form,
+                 huber_delta=huber_delta,
+                 huber_direction_override=huber_direction if loss_form == "huber" else None,
++                spec_schedule_override=spec_schedule_override,
+             ) + anchor
+             if loss.grad_fn is None:
+                 return mu_t
+diff --git a/posture_guidance/controller.py b/posture_guidance/controller.py
+index 50938e1..4a64326 100644
+--- a/posture_guidance/controller.py
++++ b/posture_guidance/controller.py
+@@ -54,12 +54,14 @@ class PostureGuidance:
+         q: torch.Tensor,
+         t: int,
+         T: int,
++        spec_schedule_override: str = None,
+     ) -> torch.Tensor:
+         """
+         Args:
+             q: (B, N, J, 3) 或 (N, J, 3) 全局关节坐标，要求保持梯度
+             t: 当前去噪步索引
+             T: 总去噪步数
++            spec_schedule_override: 若非 None，强制覆盖每个 spec.schedule（V6 用）
+         Returns:
+             total_loss: 标量 tensor
+         """
+@@ -67,7 +69,8 @@ class PostureGuidance:
+ 
+         for spec in self.specs:
+             # 1. 时间调度：判断是否在当前 t 激活
+-            schedule_w = SCHEDULE_FUNCTIONS[spec.schedule](t, T)
++            spec_schedule = spec_schedule_override if spec_schedule_override else spec.schedule
++            schedule_w = SCHEDULE_FUNCTIONS[spec_schedule](t, T)
+             if schedule_w == 0.0:
+                 continue
+ 
+@@ -127,6 +130,7 @@ class PostureGuidance:
+         loss_form: str = "hinge",
+         huber_delta: float = 0.05,
+         huber_direction_override: str = None,
++        spec_schedule_override: str = None,
+     ):
+         """
+         兼容 diffusion 内部的调用接口。
+@@ -149,14 +153,20 @@ class PostureGuidance:
+                 若指定（"equal" / "greater_than" / "less_than"），则强制覆盖每个
+                 spec.direction 使用此方向。V6 默认走 "equal"（双边推），
+                 因为闭环 PID 必须有过推拉回信号。设 None 则尊重 spec.direction。
++            spec_schedule_override:
++                若指定（"always" / "last_quarter" / ...），则强制覆盖每个
++                spec.schedule。V6 推荐设 "always"，让控制器在全部去噪步都有梯度信号
++                （c_t 时间步衰减自带早期软系数，不需要 spec schedule 二次 mask）。
++                None 则尊重 spec.schedule（V1-V5 默认）。
+         """
+         if loss_form == "hinge":
+-            loss = self(q, t, T)
++            loss = self(q, t, T, spec_schedule_override=spec_schedule_override)
+         elif loss_form == "huber":
+             loss = self._compute_total_huber(
+                 q, t, T,
+                 huber_delta=huber_delta,
+                 direction_override=huber_direction_override,
++                spec_schedule_override=spec_schedule_override,
+             )
+         else:
+             raise ValueError(f"Unknown loss_form: {loss_form}")
+@@ -166,7 +176,8 @@ class PostureGuidance:
+ 
+         smooth = torch.zeros((), device=q.device, dtype=q.dtype)
+         for spec in self.specs:
+-            schedule_w = SCHEDULE_FUNCTIONS[spec.schedule](t, T)
++            spec_schedule = spec_schedule_override if spec_schedule_override else spec.schedule
++            schedule_w = SCHEDULE_FUNCTIONS[spec_schedule](t, T)
+             if schedule_w == 0.0:
+                 continue
+             angle = spec.angle_fn(q, **spec.angle_fn_kwargs)
+@@ -181,16 +192,20 @@ class PostureGuidance:
+         self, q, t, T,
+         huber_delta: float = 0.05,
+         direction_override: str = None,
++        spec_schedule_override: str = None,
+     ):
+         """
+         与 __call__ 同样的 spec/schedule/mask/单位转换逻辑，
+         把内层 compute_hinge_loss 换成 compute_huber_loss。
+         给 V6 闭环 PID 使用。
++
++        spec_schedule_override: 若非 None，则强制每个 spec 走该 schedule（V6 推荐 "always"）。
+         """
+         total_loss = torch.zeros((), device=q.device, dtype=q.dtype)
+ 
+         for spec in self.specs:
+-            schedule_w = SCHEDULE_FUNCTIONS[spec.schedule](t, T)
++            spec_schedule = spec_schedule_override if spec_schedule_override else spec.schedule
++            schedule_w = SCHEDULE_FUNCTIONS[spec_schedule](t, T)
+             if schedule_w == 0.0:
+                 continue
+ 
+-- 
+2.43.0
+
