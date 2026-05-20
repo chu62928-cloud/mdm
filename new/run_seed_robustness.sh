@@ -25,11 +25,17 @@ declare -A BEST_VARIANTS=(
   
   # [测试 2] Step 2 闭环控制核心方案
   # 输出路径会自动变成: ./output/seedtest_v6_closed_loop_test
-  ["v6_closed_loop"]='v6_closed_loop|{"Kp":50,"Ki":1,"Kd":5,"s_min":0.5,"s_max":120,
+  # ["v6_closed_loop"]='v6_closed_loop|{"Kp":80,"Ki":1,"Kd":5,"s_min":0.5,"s_max":50,
+  #                      "I_max":20,"beta_ema":0.8,"lambda_smooth":0.02,
+  #                      "manifold_project":true,
+  #                      "loss_form":"huber","huber_delta":0.05,
+  #                      "normalize_grad":false,"band_gate":false}'
+  ["v6_closed_loop_always_1"]='v6_closed_loop|{"Kp":80,"Ki":1,"Kd":5,"s_min":0.5,"s_max":50,
                        "I_max":20,"beta_ema":0.8,"lambda_smooth":0.02,
                        "manifold_project":true,
                        "loss_form":"huber","huber_delta":0.05,
-                       "band_gate":true,"band_gate_factor":1.0}'
+                       "normalize_grad":false,"band_gate":false,
+                       "spec_schedule_override":"always"}'
 )
 
 SEEDS=(7 42 99 123 2024)
