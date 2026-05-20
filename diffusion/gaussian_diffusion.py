@@ -1206,6 +1206,12 @@ class GaussianDiffusion:
         # PID 的 c_t 时间步衰减已经自带早期软系数，spec schedule 二次 mask 多余
         # 默认 "always" 让控制器在全部去噪步都有梯度信号
         spec_schedule_override="always",
+        # ---- 迭代 5：sigma 硬过滤 ----
+        # "always" + s_min 同时存在时，最早期高 σ 步（c_t≈0 但 s_min 顶住）
+        # 仍会注入小推力，per-frame 一致性受损。sigma_cutoff 直接跳过
+        # σ > cutoff 的步，比 spec_schedule 更原理化（按噪声水平而非 step 索引）。
+        # 推荐 0.4–0.6。None=禁用，等价于"always"全程引导。
+        sigma_cutoff=None,
         # ---- 迭代 3 关键变更 ----
         # 默认不归一化梯度 + 默认关闭 band_gate
         # Huber loss 的 grad 自带衰减（远目标=1，近目标→0），归一化反而破坏自调节
@@ -1255,6 +1261,17 @@ class GaussianDiffusion:
 
         if not _schedule_active(schedule, t_int, T):
             return mu_t
+
+        # ---- 0. (迭代 5) sigma 硬过滤：跳过过早的高噪声步 ----
+        # 在 sigma > sigma_cutoff 时 pred_xstart 仍嘈杂，推力方向不可信
+        # 直接 return mu_t 避免噪声注入；PID 状态保留以便后续步使用
+        if sigma_cutoff is not None:
+            sigma_now = float(self.posterior_variance[t_int]) ** 0.5
+            if sigma_now > sigma_cutoff:
+                if verbose:
+                    print(f"[V6 t={t_int:3d}] SIGMA-CUTOFF skip "
+                          f"(σ={sigma_now:.3f} > cutoff={sigma_cutoff:.3f})")
+                return mu_t
 
         # ---- 1. lazy-init controller in guidance object ----
         if not hasattr(guidance, "_v6_ctrl") or guidance._v6_ctrl is None:
