@@ -1185,9 +1185,9 @@ class GaussianDiffusion:
     def _guidance_v6_closed_loop(
         self, *, mu_t, x_t, pred_xstart, t_int, t_tensor, T,
         model, model_kwargs, fk_fn, guidance, guidance_loss_fn,
-        # PID gains
-        Kp=50.0, Ki=1.0, Kd=5.0,
-        s_min=0.5, s_max=120.0, I_max=20.0,
+        # PID gains (calibrated for RAW grad — |grad|~0.2, s_t~80 → |Δμ|~16)
+        Kp=80.0, Ki=1.0, Kd=5.0,
+        s_min=0.5, s_max=50.0, I_max=20.0,
         # smoothing
         beta_ema=0.8,
         # anti-windup
@@ -1201,8 +1201,14 @@ class GaussianDiffusion:
         loss_form="huber",                  # "huber" | "hinge"
         huber_delta=0.05,                   # rad
         huber_direction="equal",            # 强制 V6 走双边
-        band_gate=True,                     # |err| < tol*factor 时直接 return mu_t
-        band_gate_factor=1.0,
+        # ---- 迭代 3 关键变更 ----
+        # 默认不归一化梯度 + 默认关闭 band_gate
+        # Huber loss 的 grad 自带衰减（远目标=1，近目标→0），归一化反而破坏自调节
+        normalize_grad=False,
+        band_gate=False,
+        band_gate_factor=0.5,               # 若开启，只在 |err|<tol/2 时停（很保守）
+        # 单步位移上限（防止大冲击；与 normalize_grad=False 配合作为 safety）
+        delta_max=None,                     # None=不限；典型值 5.0
         # schedule and base scale
         schedule="always",
         base_weight=1.0,
@@ -1214,25 +1220,29 @@ class GaussianDiffusion:
         verbose=True,
     ):
         """
-        Step 2 + Step 3 核心实现（迭代 2，已修复 hinge-blind 问题）。
+        迭代 3：raw-grad + Huber 自调节，移除 band-gate。
+
+        失败的迭代 2 暴露了一个反直觉的事：grad 归一化 + band-gate 让 V6 退化
+        成"前 2 步大冲击 + 后 11 步完全放任"，corr 从 0.236 崩到 0.022（CV=1860%）。
+
+        诊断：
+          - Huber 的梯度本身就是有界自调节的（远=1，近→0，准=0），
+            做 grad/||grad|| 归一化把这个自调节杀了 → 每步固定大冲击
+          - band-gate 一旦触发就锁死后面所有步 → 模型无机会平滑整合约束
+          - 早期 pred_xstart 仍含强噪，冲击方向几乎随机 → 50% 概率搞反时间结构
+
+        迭代 3 修正：
+          - 默认 normalize_grad=False（用 raw grad，让 Huber 自带衰减生效）
+          - 默认 band_gate=False（让 grad 自然衰减来收敛，不强行截断）
+          - 默认 Kp=80（raw grad |≈0.2|，需要更大 s_t 才能给足早期推力）
+          - 保留 delta_max 作为 safety clip（防偶发大冲击）
 
         每步去噪：
-          1. 跑一次 DPS forward 拿 x0_hat 和 ∇L (Huber loss)
-          2. 测量 angle_now，算 err = target − angle_now
-          3. (band-gate) |err| < tol → return mu_t 直接（保 corr，避免噪声注入）
-          4. PID controller → 给出 s_t（含时间步衰减、anti-windup、EMA）
-          5. （可选）manifold orthogonal projection 修正 grad 方向
-          6. mu_t_new = mu_t − s_t · grad / ‖grad‖
-
-        关键差异 vs 迭代 1：
-          - 默认 Huber loss（loss_form="huber" + huber_direction="equal"）
-            → 过推时 grad 方向反转，能主动拉回（hinge 在此处 grad=0 致命）
-          - 默认 s_min=0.5（原 5.0 一直顶住 PID 输出，让控制器形同虚设）
-          - 默认 Kp=50（提供更大早期驱动力，配合 s_min 下降）
-          - band_gate 用 err 信号而非 loss 信号判定收敛
-          - 删除旧的 `loss.item()==0.0` 早退（lambda_smooth>0 时该判定恒不触发）
-
-        TODO（next iter）: 检测 cos_sim(x0_hat, prev_x0_hat) 触发 time-travel。
+          1. (可选 band-gate，默认关) 检查 pred_xstart 的 angle 是否在带内
+          2. DPS forward 拿 x0_hat, grad, angle_now
+          3. PID controller 给出 s_t（基于 err = target − angle_now）
+          4. (可选) manifold orthogonal projection
+          5. mu_t_new = mu_t − s_t · grad           # raw grad！不归一化
         """
         from posture_guidance.closed_loop_controller import (
             ClosedLoopController, orthogonal_project,
@@ -1343,19 +1353,35 @@ class GaussianDiffusion:
         if manifold_project:
             grad = orthogonal_project(grad, x0_hat, alpha=manifold_alpha)
 
-        # ---- 6. per-batch normalize 后乘 s_t ----
-        gn = grad.flatten(1).norm(dim=1).clamp_min(1e-8)            # (B,)
+        # ---- 6. 计算 delta：默认用 raw grad（Huber 自带衰减）----
+        B = grad.shape[0]
+        gn = grad.flatten(1).norm(dim=1).clamp_min(1e-8)            # (B,) 仅诊断
         gn_shape = [B] + [1] * (grad.dim() - 1)
-        grad_unit = grad / gn.view(*gn_shape)
-        delta = s_t.view(*gn_shape) * grad_unit
+
+        if normalize_grad:
+            # 旧路径（迭代 1/2 行为，保留可选）：grad/||grad|| 单位向量
+            grad_for_step = grad / gn.view(*gn_shape)
+        else:
+            # 默认路径（迭代 3）：raw grad，让 Huber 的有界自调节梯度起效
+            grad_for_step = grad
+
+        delta = s_t.view(*gn_shape) * grad_for_step
+
+        # ---- 6b. (可选 safety) delta_max clip 防偶发大冲击 ----
+        if delta_max is not None:
+            delta_norm = delta.flatten(1).norm(dim=1).clamp_min(1e-8)
+            clip_scale = (delta_max / delta_norm).clamp_max(1.0)
+            delta = delta * clip_scale.view(*gn_shape)
 
         if verbose:
+            mode = "norm" if normalize_grad else "raw"
             print(
                 f"[V6 t={t_int:3d}] err={err.mean().item():+.4f}rad "
                 f"sigma={sigma_t:.4f} s_t={s_t.mean().item():.3f} "
                 f"loss={loss.item():.4f} grad_norm={gn.mean().item():.5f} "
-                f"|Δμ|={delta.norm().item():.4f}"
-                f"{' (proj)' if manifold_project else ''}"
+                f"|Δμ|={delta.norm().item():.4f} ({mode}"
+                f"{', proj' if manifold_project else ''}"
+                f"{', clip' if delta_max is not None else ''})"
             )
 
         return mu_t.detach() - delta
