@@ -36,12 +36,19 @@ declare -A BEST_VARIANTS=(
   #                      "loss_form":"huber","huber_delta":0.05,
   #                      "normalize_grad":false,"band_gate":false,
   #                      "spec_schedule_override":"always"}'
-  ["v6_closed_loop_second_half"]='v6_closed_loop|{"Kp":80,"Ki":1,"Kd":5,"s_min":0.05,"s_max":50,
+  # ["v6_closed_loop_second_half"]='v6_closed_loop|{"Kp":80,"Ki":1,"Kd":5,"s_min":0.05,"s_max":50,
+  #                      "I_max":20,"beta_ema":0.8,"lambda_smooth":0.03,
+  #                      "manifold_project":true,
+  #                      "loss_form":"huber","huber_delta":0.05,
+  #                      "normalize_grad":false,"band_gate":false,
+  #                      "spec_schedule_override":"second_half"}'
+  ["v6_closed_loop_sigma_cutoff_0.18"]='v6_closed_loop|{"Kp":80,"Ki":1,"Kd":5,"s_min":0.05,"s_max":50,
                        "I_max":20,"beta_ema":0.8,"lambda_smooth":0.03,
                        "manifold_project":true,
                        "loss_form":"huber","huber_delta":0.05,
                        "normalize_grad":false,"band_gate":false,
-                       "spec_schedule_override":"second_half"}'
+                       "spec_schedule_override":"always",
+                       "sigma_cutoff":0.18}'
 )
 
 SEEDS=(7 42 99 123 2024)
