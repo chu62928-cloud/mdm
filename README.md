@@ -63,7 +63,7 @@ motion-diffusion-model/
 └── PROJECT_SUMMARY.md                 ← 本文档
 ```
 
-新增 / 修改的关键文件标 【新增】。所有改动都在分支 `claude/fix-code-bugs-optimization-1kSEa`，commit 序列 `8effecf` → `9fb026b` → `1b4cdfd` → `3d21aaf` → `db8b9b8` → `4de9b41` → （本 commit）。
+新增 / 修改的关键文件标 【新增】。所有改动都在分支 `claude/fix-code-bugs-optimization-final`，commit 序列 `8effecf` → `9fb026b` → `1b4cdfd` → `3d21aaf` → `db8b9b8` → `4de9b41` → （本 commit）。
 
 ---
 
