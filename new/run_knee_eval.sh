@@ -59,16 +59,16 @@ POSTURE="膝超伸"
 MOTION_LENGTH="${MOTION_LENGTH:-6.0}"
 HUBER_DELTA="0.05"
 
-V2_KWARGS='{"s":40.0,"schedule":"always","base_weight":1.0}'
-V6_KWARGS="{\"Kp\":80,\"Ki\":1,\"Kd\":5,\"s_min\":0.05,\"s_max\":50,\
+V2_KWARGS='{"s":80.0,"schedule":"always","base_weight":1.0}'
+V6_KWARGS="{\"Kp\":160,\"Ki\":1,\"Kd\":5,\"s_min\":0.05,\"s_max\":100,\
 \"I_max\":20,\"beta_ema\":0.8,\"lambda_smooth\":0.03,\
 \"manifold_project\":true,\"loss_form\":\"huber\",\
 \"huber_delta\":${HUBER_DELTA},\"normalize_grad\":false,\
 \"band_gate\":false,\"spec_schedule_override\":\"second_half\"}"
 
 declare -A VARIANTS=(
-    ["v2_dps_s40_always"]="v2_dps|${V2_KWARGS}"
-    ["v6_closed_loop_second_half"]="v6_closed_loop|${V6_KWARGS}"
+    ["v2_dps_s80_always"]="v2_dps|${V2_KWARGS}"
+    ["v6_kp160_smx100"]="v6_closed_loop|${V6_KWARGS}"
 )
 
 echo ""
@@ -98,10 +98,10 @@ for CONFIG_NAME in "${!VARIANTS[@]}"; do
 
     for SEED in "${SEEDS[@]}"; do
         SEED_OUT="${OUT_BASE}/seed${SEED}"
-        if [ -f "${SEED_OUT}/comparison.npy" ]; then
-            echo "   seed=${SEED} CACHED, skip"
-            continue
-        fi
+        # if [ -f "${SEED_OUT}/comparison.npy" ]; then
+        #     echo "   seed=${SEED} CACHED, skip"
+        #     continue
+        # fi
         echo "   seed=${SEED}..."
         GUIDANCE_VARIANT="${VARIANT}" \
         GUIDANCE_KWARGS_JSON="${KWARGS}" \
@@ -111,3 +111,12 @@ for CONFIG_NAME in "${!VARIANTS[@]}"; do
         MOTION_LENGTH="${MOTION_LENGTH}" \
         OUTPUT_DIR="${SEED_OUT}" \
         MAKE_ANIMATION="" \
+        ./new/run_posture_pipeline.sh > /dev/null 2>&1  # <-- 1. The script to actually run!
+    done  # <-- 2. Close the inner SEED loop
+done      # <-- 3. Close the outer CONFIG_NAME loop
+
+echo ""
+echo "================================================="
+echo "  All done! Now run aggregate_seeds to see the results:"
+echo "    python -m new.aggregate_seeds ./output/knee_eval_${PROMPT_TAG}_*"
+echo "================================================="

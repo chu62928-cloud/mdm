@@ -244,7 +244,7 @@ register_posture(LossSpec(
     target_deg=190.0,               # 超伸 5°
     direction="greater_than",
     tolerance_deg=1.5,
-    phase="always",            
+    phase="stance_left",            
     schedule="last_quarter",
     base_weight=15.0,
     unit="deg",
@@ -258,7 +258,7 @@ register_posture(LossSpec(
     target_deg=190.0,
     direction="greater_than",
     tolerance_deg=1.5,
-    phase="always",
+    phase="stance_right",
     schedule="last_quarter",
     base_weight=15.0,
 ))
