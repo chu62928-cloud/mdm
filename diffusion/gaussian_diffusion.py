@@ -861,6 +861,7 @@ class GaussianDiffusion:
         self, *, mu_t, x_t, t_int, t_tensor, T,
         model, model_kwargs, fk_fn, guidance_loss_fn,
         s=30.0, schedule="last_quarter", base_weight=1.0,
+        spec_schedule_override=None,
     ):
         """
         V2a: DPS-style (Chung et al. NeurIPS 2022).
@@ -909,7 +910,9 @@ class GaussianDiffusion:
                 print(f"[V2 SKIP t={t_int}] q.grad_fn=None")
                 return mu_t
 
-            loss = base_weight * guidance_loss_fn(q, t_int, T)
+            # 将外层 schedule 透传给 controller，保持内外一致
+            _spec_sched = spec_schedule_override if spec_schedule_override is not None else schedule
+            loss = base_weight * guidance_loss_fn(q, t_int, T, spec_schedule_override=_spec_sched)
             if loss.grad_fn is None:
                 return mu_t
 
@@ -1116,7 +1119,7 @@ class GaussianDiffusion:
         self, *, mu_t, x_t, t_int, t_tensor, T,
         model, model_kwargs, fk_fn, guidance_loss_fn,
         s=2.0, schedule="always", base_weight=1.0,
-        grad_clip_norm=None,
+        grad_clip_norm=None, spec_schedule_override=None,
     ):
         """
         Step 1: gradient-normalized DPS.
@@ -1156,7 +1159,8 @@ class GaussianDiffusion:
             q = fk_fn(x0_hat)
             if q.grad_fn is None:
                 return mu_t
-            loss = base_weight * guidance_loss_fn(q, t_int, T)
+            _spec_sched = spec_schedule_override if spec_schedule_override is not None else schedule
+            loss = base_weight * guidance_loss_fn(q, t_int, T, spec_schedule_override=_spec_sched)
             if loss.grad_fn is None or loss.item() == 0.0:
                 return mu_t
             grad = th.autograd.grad(loss, x_t_var)[0]
