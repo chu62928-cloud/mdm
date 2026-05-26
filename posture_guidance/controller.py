@@ -67,7 +67,9 @@ class PostureGuidance:
             total_loss: 标量 tensor
         """
         total_loss = torch.zeros((), device=q.device, dtype=q.dtype)
-        diag = os.environ.get("DIAGNOSTIC", "0") == "1" 
+        diag = os.environ.get("DIAGNOSTIC", "0") == "1"
+        if diag:
+            print(f"[CTRL_CALLED] t={t} T={T} specs={[s.name for s in self.specs]} diag={os.environ.get('DIAGNOSTIC','NOT_SET')}", flush=True)
 
         for spec in self.specs:
             # 1. 时间调度：判断是否在当前 t 激活
