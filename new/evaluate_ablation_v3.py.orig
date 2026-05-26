@@ -29,9 +29,9 @@ from posture_guidance import angle_ops
 ANGLE_TARGETS = {
     "骨盆前倾":   ("pelvis_tilt_angle",       20.0, 2.0),
     "骨盆前倾_深蹲": ("pelvis_tilt_angle",    25.0, 3.0),
-    "膝超伸":     ("signed_knee_angle_both",  190.0, 1.5),
-    "膝超伸_左":   ("signed_knee_angle_left", 190.0, 1.5),
-    "膝超伸_右":   ("signed_knee_angle_right", 190.0, 1.5),
+    "膝超伸":     ("signed_knee_angle_both",  185.0, 3.0),
+    "膝超伸_左":   ("signed_knee_angle_left", 185.0, 3.0),
+    "膝超伸_右":   ("signed_knee_angle_right", 185.0, 3.0),
     "驼背":       ("spine_posterior_bulge",  0.08, 0.02),
 }
 

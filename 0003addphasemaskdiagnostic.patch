@@ -1,0 +1,39 @@
+--- a/posture_guidance/controller.py
++++ b/posture_guidance/controller.py
+@@ -1,6 +1,7 @@
+ """
+ Top-level posture guidance controller.
+ 对外接口：传入指令列表 + 当前 q + 时间步 t，返回总 loss。
+ """
++import os
+ import math
+ import torch
+@@ -75,6 +76,8 @@ class PostureGuidance:
+         """
+         total_loss = torch.zeros((), device=q.device, dtype=q.dtype)
+
++        diag = os.environ.get("DIAGNOSTIC", "0") == "1"
++
+         for spec in self.specs:
+             # 1. 时间调度：判断是否在当前 t 激活
+             spec_schedule = spec_schedule_override if spec_schedule_override else spec.schedule
+@@ -94,6 +97,18 @@ class PostureGuidance:
+             elif mask.dim() > angle.dim():
+                 mask = mask.squeeze(-1)
+
++            # --- phase mask diagnostic (only at boundary steps to avoid spam) ---
++            if diag and t in (0, T // 4, T // 2, 3 * T // 4, T - 1):
++                m_flat = mask.detach().float().flatten()
++                frac_active = (m_flat > 0.5).float().mean().item()
++                m_sum = m_flat.sum().item()
++                m_total = m_flat.numel()
++                print(f"[PHASE_DIAG] t={t:3d}/{T} spec={spec.name:16s} "
++                      f"phase={spec.phase:14s} "
++                      f"mask_frac_active={frac_active*100:5.1f}% "
++                      f"mask_sum={m_sum:6.2f}/{m_total} "
++                      f"angle_mean={angle.detach().mean().item():.4f}",
++                      flush=True)
++
+             # 4. 单位转换
+             if spec.unit == "deg":
+                 target_val = spec.target_deg * math.pi / 180.0

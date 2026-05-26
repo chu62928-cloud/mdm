@@ -1,0 +1,28 @@
+--- a/new/aggregate_seeds.py
++++ b/new/aggregate_seeds.py
+@@ -22,8 +22,28 @@ def main():
+     parser.add_argument("seedtest_dirs", nargs="+",
+                         help="seed test 目录列表，例如 seedtest_v2_dps_best/")
+-    parser.add_argument("--posture", type=str, default="骨盆前倾")
++    parser.add_argument("--posture", type=str, default=None,
++                        help="评估目标体态。None 时根据第一个目录名自动推断。")
+     args = parser.parse_args()
+
++    # 自动推断 posture（避免漏传 --posture 把数据按错误目标评估）
++    if args.posture is None:
++        first = Path(args.seedtest_dirs[0]).name.lower()
++        if "knee" in first or "膝" in first:
++            args.posture = "膝超伸"
++        elif "apt" in first or "pelvis" in first or "骨盆" in first:
++            args.posture = "骨盆前倾"
++        elif "kyphosis" in first or "驼背" in first:
++            args.posture = "驼背"
++        elif "fhp" in first or "头前伸" in first:
++            args.posture = "头前伸"
++        else:
++            args.posture = "骨盆前倾"
++            print(f"⚠ 无法从目录名 '{first}' 推断 posture，使用默认 '骨盆前倾'。"
++                  f"如需评估其它体态，请显式传 --posture <name>。")
++        print(f"[auto-detect] posture = {args.posture}")
++
+     all_results = {}  # variant_name -> list of metric dicts

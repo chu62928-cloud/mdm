@@ -29,8 +29,13 @@ MOTION_LENGTH="${MOTION_LENGTH:-6.0}"
 NUM_SAMPLES="${NUM_SAMPLES:-1}"
 LBFGS_STEPS="${LBFGS_STEPS:-8}"
 LR="${LR:-0.05}"
+GUIDANCE_VARIANT="${GUIDANCE_VARIANT:-baseline}" # 提取你传入的 variant，默认 baseline
 
-OUTPUT_DIR="${OUTPUT_DIR:-./new_results/posture_exp_$(date +%Y%m%d_%H%M%S)}"
+# 2. 动态构建输出文件夹的名称 (拼接 Variant、体态、Seed 和时间戳防重名)
+DEFAULT_DIR_NAME="${GUIDANCE_VARIANT}_${POSTURE}_seed${SEED}_$(date +%Y%m%d_%H%M%S)"
+
+# 3. 赋值 OUTPUT_DIR（如果你在外部强行传了 OUTPUT_DIR 就用外部的，否则用拼接好的）
+OUTPUT_DIR="${OUTPUT_DIR:-./new_results/${DEFAULT_DIR_NAME}}"
 
 N_KEYFRAMES="${N_KEYFRAMES:-7}"
 CYCLE_LABEL="${CYCLE_LABEL:-Gait Cycle}"

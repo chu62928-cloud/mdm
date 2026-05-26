@@ -4,6 +4,7 @@ Top-level posture guidance controller.
 """
 import math
 import torch
+import os
 
 from .registry import (
     POSTURE_REGISTRY,
@@ -66,6 +67,7 @@ class PostureGuidance:
             total_loss: 标量 tensor
         """
         total_loss = torch.zeros((), device=q.device, dtype=q.dtype)
+        diag = os.environ.get("DIAGNOSTIC", "0") == "1" 
 
         for spec in self.specs:
             # 1. 时间调度：判断是否在当前 t 激活
@@ -86,6 +88,13 @@ class PostureGuidance:
                     mask = mask.unsqueeze(-1)
             elif mask.dim() > angle.dim():
                 mask = mask.squeeze(-1)
+                if diag:
+                    m_flat = mask.detach().float().flatten()
+                    print(f"[PHASE_DIAG] t={t:3d}/{T} spec={spec.name} "
+                        f"phase={spec.phase} "
+                        f"mask_active={((m_flat>0.5).float().mean()*100):.1f}% "
+                        f"angle_mean={angle.detach().mean().item()*180/3.14159:.1f}deg",
+                        flush=True)
 
             # 4. 单位转换
             if spec.unit == "deg":
