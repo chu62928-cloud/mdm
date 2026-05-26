@@ -700,11 +700,11 @@ class GaussianDiffusion:
         with gradients enabled.
         """
         # Build a guidance loss closure that all variants share
-        def guidance_loss_fn(q, t_in, T_in):
+        def guidance_loss_fn(q, t_in, T_in, spec_schedule_override=None):
             # anchor 保证返回值始终连接到 q（grad_fn 不为 None），
             # 即使所有 target 在当前时间步都不激活（loss 值为 0）。
             anchor = q.sum() * 0.0
-            return guidance.compute_loss(q, t_in, T_in) + anchor
+            return guidance.compute_loss(q, t_in, T_in, spec_schedule_override=spec_schedule_override) + anchor
 
         if variant_name == "v1_mu_sgd":
             mu_new = self._guidance_v1_mu_sgd(
