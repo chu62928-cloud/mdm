@@ -85,18 +85,17 @@ class PostureGuidance:
             mask = PHASE_FUNCTIONS[spec.phase](self.detector, q)
             # 确保 mask shape 与 angle 一致
             if mask.dim() < angle.dim():
-                # mask 可能是 (B, N) 而 angle 是 (B, N, ...)
                 while mask.dim() < angle.dim():
                     mask = mask.unsqueeze(-1)
             elif mask.dim() > angle.dim():
                 mask = mask.squeeze(-1)
-                if diag:
-                    m_flat = mask.detach().float().flatten()
-                    print(f"[PHASE_DIAG] t={t:3d}/{T} spec={spec.name} "
-                        f"phase={spec.phase} "
-                        f"mask_active={((m_flat>0.5).float().mean()*100):.1f}% "
-                        f"angle_mean={angle.detach().mean().item()*180/3.14159:.1f}deg",
-                        flush=True)
+            if diag:
+                m_flat = mask.detach().float().flatten()
+                print(f"[PHASE_DIAG] t={t:3d}/{T} spec={spec.name} "
+                    f"phase={spec.phase} "
+                    f"mask_active={((m_flat>0.5).float().mean()*100):.1f}% "
+                    f"angle_mean={angle.detach().mean().item()*180/3.14159:.1f}deg",
+                    flush=True)
 
             # 4. 单位转换
             if spec.unit == "deg":
