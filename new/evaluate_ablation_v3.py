@@ -27,15 +27,15 @@ from posture_guidance import angle_ops
 
 
 ANGLE_TARGETS = {
-    "骨盆前倾":   ("pelvis_tilt_angle",       20.0, 2.0),
-    "骨盆前倾_深蹲": ("pelvis_tilt_angle",    25.0, 3.0),
-    "膝超伸":     ("signed_knee_angle_both",  190.0, 1.5),
-    "膝超伸_左":   ("signed_knee_angle_left", 190.0, 1.5),
-    "膝超伸_右":   ("signed_knee_angle_right", 190.0, 1.5),
-    "膝弯曲":     ("signed_knee_angle_both",  125.0, 2.0),
-    "膝弯曲_左":   ("signed_knee_angle_left", 125.0, 2.0),
-    "膝弯曲_右":   ("signed_knee_angle_right", 125.0, 2.0),
-    "驼背":       ("spine_posterior_bulge",  0.08, 0.02),
+    "骨盆前倾":      ("pelvis_tilt_angle",        20.0, 2.0,  "greater_than"),
+    "骨盆前倾_深蹲":  ("pelvis_tilt_angle",        25.0, 3.0,  "greater_than"),
+    "膝超伸":        ("signed_knee_angle_both",   190.0, 1.5,  "greater_than"),
+    "膝超伸_左":     ("signed_knee_angle_left",   190.0, 1.5,  "greater_than"),
+    "膝超伸_右":     ("signed_knee_angle_right",  190.0, 1.5,  "greater_than"),
+    "膝弯曲":        ("signed_knee_angle_both",   125.0, 2.0,  "less_than"),
+    "膝弯曲_左":     ("signed_knee_angle_left",   125.0, 2.0,  "less_than"),
+    "膝弯曲_右":     ("signed_knee_angle_right",  125.0, 2.0,  "less_than"),
+    "驼背":          ("spine_posterior_bulge",      0.08, 0.02, "greater_than"),
 }
 
 
@@ -58,7 +58,7 @@ def compute_metrics(npy_path, posture):
 
     if posture not in ANGLE_TARGETS:
         raise ValueError(f"Unknown posture: {posture}")
-    fn_name, target_deg, tol_deg = ANGLE_TARGETS[posture]
+    fn_name, target_deg, tol_deg, direction = ANGLE_TARGETS[posture]
     angle_fn = get_angle_fn(fn_name)
     use_radians = "spine_posterior" not in fn_name
 
@@ -81,8 +81,11 @@ def compute_metrics(npy_path, posture):
     hit_mask = (a_g_deg >= target_deg - tol_deg) & (a_g_deg <= target_deg + tol_deg)
     hit_rate = float(hit_mask.mean())
 
-    # 也算"宽松版"hit（仅 >= target-tol）做对比，写入但不参与 score
-    hit_rate_loose = float((a_g_deg >= target_deg - tol_deg).mean())
+    # 宽松版 hit：方向感知的单侧检查（不参与 score，仅用于 classify_shape 分支判断）
+    if direction == "less_than":
+        hit_rate_loose = float((a_g_deg <= target_deg + tol_deg).mean())
+    else:  # greater_than / equal
+        hit_rate_loose = float((a_g_deg >= target_deg - tol_deg).mean())
 
     # 平均角度偏离目标的距离
     target_distance = float(abs(a_g_deg.mean() - target_deg))
