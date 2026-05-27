@@ -56,13 +56,13 @@ esac
 ALL_SEEDS=(7 42 99 123 2024 17 23 88 251 333 666 777 1337 9999 10000)
 SEEDS=("${ALL_SEEDS[@]:0:$N_SEEDS}")
 
-# 两个对比 variant
-V2_KWARGS='{"s":40.0,"schedule":"always","base_weight":1.0}'
-V6_KWARGS="{\"Kp\":80,\"Ki\":1,\"Kd\":5,\"s_min\":0.05,\"s_max\":50,\"I_max\":20,\"beta_ema\":0.8,\"lambda_smooth\":0.03,\"manifold_project\":true,\"loss_form\":\"huber\",\"huber_delta\":${HUBER_DELTA},\"normalize_grad\":false,\"band_gate\":false,\"spec_schedule_override\":\"second_half\"}"
+# 两个对比 variant — 都用 last_quarter（骨盆前倾 N=15 确认的最佳 schedule）
+V2_KWARGS='{"s":40.0,"schedule":"last_quarter","base_weight":1.0}'
+V6_KWARGS="{\"Kp\":80,\"Ki\":1,\"Kd\":5,\"s_min\":0.05,\"s_max\":50,\"I_max\":20,\"beta_ema\":0.8,\"lambda_smooth\":0.03,\"manifold_project\":true,\"loss_form\":\"huber\",\"huber_delta\":${HUBER_DELTA},\"normalize_grad\":false,\"band_gate\":false,\"spec_schedule_override\":\"last_quarter\"}"
 
 declare -A VARIANTS=(
-    ["v2_dps_s40_always"]="v2_dps|$V2_KWARGS"
-    ["v6_closed_loop_second_half"]="v6_closed_loop|$V6_KWARGS"
+    ["v2_dps_s40_last_quarter"]="v2_dps|$V2_KWARGS"
+    ["v6_closed_loop_last_quarter"]="v6_closed_loop|$V6_KWARGS"
 )
 
 TEXT_PROMPT="${TEXT_PROMPT:-a person is walking forward}"
@@ -84,7 +84,7 @@ echo "================================================="
 echo "  跨体态实验：${POSTURE} (${UNIT_TAG} unit)"
 echo "  N_SEEDS = ${N_SEEDS}"
 echo "  huber_delta = ${HUBER_DELTA}"
-echo "  variants: v2_dps_s40_always + v6_closed_loop_second_half"
+echo "  variants: v2_dps_s40_last_quarter + v6_closed_loop_last_quarter"
 echo "================================================="
 
 for CONFIG_NAME in "${!VARIANTS[@]}"; do

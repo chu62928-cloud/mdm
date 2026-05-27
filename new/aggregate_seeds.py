@@ -32,7 +32,9 @@ def main():
     # 自动推断 posture（避免漏传 --posture 把数据按错误目标评估）
     if args.posture is None:
         first = __import__('pathlib').Path(args.seedtest_dirs[0]).name.lower()
-        if "knee" in first or "膝" in first:
+        if "flex" in first or "膝弯曲" in first:  # knee_flex must match before generic "knee"
+            args.posture = "膝弯曲"
+        elif "knee" in first or "膝" in first:
             args.posture = "膝超伸"
         elif "apt" in first or "pelvis" in first or "骨盆" in first:
             args.posture = "骨盆前倾"
