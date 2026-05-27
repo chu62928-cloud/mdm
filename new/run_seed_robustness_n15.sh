@@ -25,6 +25,9 @@ declare -A BEST_VARIANTS=(
   # ["v2_dps_s40_always"]='v2_dps|{"s":40.0,"schedule":"always","base_weight":1.0}'
   ["v2_dps_s40_last_quarter"]='v2_dps|{"s":40.0,"schedule":"last_quarter","base_weight":1.0}'
   # ["v6_closed_loop_second_half"]='v6_closed_loop|{"Kp":80,"Ki":1,"Kd":5,"s_min":0.05,"s_max":50,"I_max":20,"beta_ema":0.8,"lambda_smooth":0.03,"manifold_project":true,"loss_form":"huber","huber_delta":0.05,"normalize_grad":false,"band_gate":false,"spec_schedule_override":"second_half"}'
+
+  # 公平对比：V6 使用与 V2 相同的 last_quarter schedule
+  ["v6_closed_loop_last_quarter"]='v6_closed_loop|{"Kp":80,"Ki":1,"Kd":5,"s_min":0.05,"s_max":50,"I_max":20,"beta_ema":0.8,"lambda_smooth":0.03,"manifold_project":true,"loss_form":"huber","huber_delta":0.05,"normalize_grad":false,"band_gate":false,"spec_schedule_override":"last_quarter"}'
 )
 
 # 15 seeds：原 5 + 新 10。前 5 个与 run_seed_robustness.sh 完全一致，方便对比。
@@ -81,4 +84,5 @@ echo ""
 echo "  关键判据："
 echo "    V6 CV(corr) < 30% 持续保持 → 稳定性卖点确立"
 echo "    V2 corr mean ≈ 0.46 持续保持 → best-mean 基线确立"
+echo "    v6_last_quarter vs v2_last_quarter → 同 schedule 公平对比，排除 schedule 因素"
 echo "================================================="

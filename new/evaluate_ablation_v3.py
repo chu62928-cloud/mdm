@@ -32,6 +32,9 @@ ANGLE_TARGETS = {
     "膝超伸":     ("signed_knee_angle_both",  190.0, 1.5),
     "膝超伸_左":   ("signed_knee_angle_left", 190.0, 1.5),
     "膝超伸_右":   ("signed_knee_angle_right", 190.0, 1.5),
+    "膝弯曲":     ("signed_knee_angle_both",  125.0, 2.0),
+    "膝弯曲_左":   ("signed_knee_angle_left", 125.0, 2.0),
+    "膝弯曲_右":   ("signed_knee_angle_right", 125.0, 2.0),
     "驼背":       ("spine_posterior_bulge",  0.08, 0.02),
 }
 

@@ -263,6 +263,34 @@ register_posture(LossSpec(
     base_weight=15.0,
 ))
 
+# --- 膝弯曲（左） --- 分布内，慢走常见，屈曲目标 125°
+register_posture(LossSpec(
+    name="膝弯曲_左",
+    angle_fn=ops.signed_knee_angle,
+    angle_fn_kwargs={"side": "left"},
+    target_deg=125.0,
+    direction="less_than",
+    tolerance_deg=2.0,
+    phase="stance_left",
+    schedule="last_quarter",
+    base_weight=15.0,
+    unit="deg",
+))
+
+# --- 膝弯曲（右） ---
+register_posture(LossSpec(
+    name="膝弯曲_右",
+    angle_fn=ops.signed_knee_angle,
+    angle_fn_kwargs={"side": "right"},
+    target_deg=125.0,
+    direction="less_than",
+    tolerance_deg=2.0,
+    phase="stance_right",
+    schedule="last_quarter",
+    base_weight=15.0,
+    unit="deg",
+))
+
 # --- 膝超伸（双侧别名，用户可以直接说"膝超伸"） ---
 # 在 controller 里展开成左右两个
 
@@ -299,6 +327,7 @@ register_posture(LossSpec(
 
 POSTURE_ALIASES = {
     "膝超伸": ["膝超伸_左", "膝超伸_右"],
+    "膝弯曲": ["膝弯曲_左", "膝弯曲_右"],
     "脚不离地": ["脚不离地_左", "脚不离地_右"],
 }
 

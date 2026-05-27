@@ -11,7 +11,8 @@
 #   POSTURE 必填（位置参数 1），N_SEEDS 默认 5
 #
 # 体态-单位-参数对照：
-#   膝超伸  deg  huber_delta=0.05 rad
+#   膝超伸  deg  huber_delta=0.05 rad  ⚠ OOD（190° 不在训练分布内）
+#   膝弯曲  deg  huber_delta=0.05 rad  ✓ 分布内（慢走 125° 常见）
 #   驼背    m    huber_delta=0.01 m   ⚠ 弱可表征体态（见 POSTURE_REPRESENTABILITY.md）
 #   头前伸  m    huber_delta=0.01 m   ⚠ 弱可表征
 #   骨盆前倾 deg  huber_delta=0.05 rad（同 N=15 实验）
@@ -25,7 +26,7 @@ set -e
 
 if [ -z "$1" ]; then
     echo "用法: bash new/run_cross_posture.sh <体态> [N_SEEDS]"
-    echo "支持体态: 膝超伸 | 骨盆前倾 | 驼背 | 头前伸"
+    echo "支持体态: 膝超伸 | 膝弯曲 | 骨盆前倾 | 驼背 | 头前伸"
     exit 1
 fi
 
@@ -40,13 +41,13 @@ case "$POSTURE" in
         echo "⚠  $POSTURE 是 meter 单位，且为'弱可表征'体态（见 POSTURE_REPRESENTABILITY.md）"
         echo "   预期 hit_band/corr 比强可表征体态差，仅作参照。"
         ;;
-    膝超伸|骨盆前倾|骨盆前倾_深蹲)
+    膝超伸|膝弯曲|骨盆前倾|骨盆前倾_深蹲)
         UNIT_TAG="deg"
         HUBER_DELTA="0.05"
         ;;
     *)
         echo "未知体态 '$POSTURE'。退出。"
-        echo "支持: 膝超伸 | 骨盆前倾 | 驼背 | 头前伸"
+        echo "支持: 膝超伸 | 膝弯曲 | 骨盆前倾 | 驼背 | 头前伸"
         exit 1
         ;;
 esac
@@ -72,6 +73,7 @@ case "$POSTURE" in
     骨盆前倾)     OUT_TAG="apt" ;;
     骨盆前倾_深蹲) OUT_TAG="apt_squat" ;;
     膝超伸)       OUT_TAG="knee" ;;
+    膝弯曲)       OUT_TAG="knee_flex" ;;
     驼背)         OUT_TAG="kyphosis" ;;
     头前伸)       OUT_TAG="fhp" ;;
     *)            OUT_TAG="$POSTURE" ;;
