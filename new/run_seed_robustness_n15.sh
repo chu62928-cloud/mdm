@@ -22,9 +22,9 @@
 set -e
 
 declare -A BEST_VARIANTS=(
-  ["v2_dps_s40_always"]='v2_dps|{"s":40.0,"schedule":"always","base_weight":1.0}'
-
-  ["v6_closed_loop_second_half"]='v6_closed_loop|{"Kp":80,"Ki":1,"Kd":5,"s_min":0.05,"s_max":50,"I_max":20,"beta_ema":0.8,"lambda_smooth":0.03,"manifold_project":true,"loss_form":"huber","huber_delta":0.05,"normalize_grad":false,"band_gate":false,"spec_schedule_override":"second_half"}'
+  # ["v2_dps_s40_always"]='v2_dps|{"s":40.0,"schedule":"always","base_weight":1.0}'
+  ["v2_dps_s40_last_quarter"]='v2_dps|{"s":40.0,"schedule":"last_quarter","base_weight":1.0}'
+  # ["v6_closed_loop_second_half"]='v6_closed_loop|{"Kp":80,"Ki":1,"Kd":5,"s_min":0.05,"s_max":50,"I_max":20,"beta_ema":0.8,"lambda_smooth":0.03,"manifold_project":true,"loss_form":"huber","huber_delta":0.05,"normalize_grad":false,"band_gate":false,"spec_schedule_override":"second_half"}'
 )
 
 # 15 seeds：原 5 + 新 10。前 5 个与 run_seed_robustness.sh 完全一致，方便对比。
