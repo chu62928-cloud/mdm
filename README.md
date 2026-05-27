@@ -1,6 +1,6 @@
 # Posture Guidance on MDM — 项目接续总结
 
-> 这份文档面向**刚接到这个项目的人**。读完应能理解：我们做了什么、当前 V6 演化到哪一版、实测结果说明什么、未解决的根本问题是什么、接下来该跑什么实验。
+> 这份文档面向**刚接到这个项目的人**。读完应能理解：我们做了什么、当前 V6 演化到哪一版、三个体态的最终实测结果、为什么会成功/失败、什么是工程问题 vs 方法固有缺陷、如果要继续做该做什么。
 
 > ⚠ 这份文档是对老版 `PROJECT_SUMMARY.md`（项目早期记录）的全面修订。老版有两个核心误判（已纠正于"零、老版误判"一节），如果你看到的还是老版，请优先以本文档为准。
 
@@ -118,153 +118,150 @@ V6 关键超参解释：
 
 ---
 
-## 四、实测结果（N=5 + N=15）
+## 四、实测结果（最终）
 
-### 骨盆前倾 N=5（早期）
+本项目完成了三个体态的完整 N=5/N=15 评估，结果可以总结为：**一个成功（骨盆前倾），两个失败但失败模式不同（膝超伸=数值 OOD，膝弯曲=相位-角度联合 OOD）**。
 
-| variant | Δ | hit_band | corr | CV(corr) | shape ✅ |
-|---|---|---|---|---|---|
-| v2_dps_s40_always | +10.7±3.1° | 83.0±9.7% | 0.461±0.098 | 21.2% | 4/5 |
-| v2b_x0_edit_bw5 | +12.9±2.7° | 56.2±15.6% | 0.514±0.140 | 27.2% | 4/5 |
-| v6_closed_loop_test (it1) | +11.0±2.9° | 78.2±3.2% | 0.236±0.132 | 56.0% | 3/5 |
-| v6_closed_loop (it3) | +9.6±2.8° | 83.7±6.7% | 0.351±0.119 | 34.0% | 3/5 |
-| v6_closed_loop_second_half (it4) | +9.1±2.8° | 63.0±8.6% | 0.427±0.126 | 29.5% | **4/5** |
-| v6_closed_loop_always (it4) | +8.9±2.8° | 54.3±9.9% | 0.454±0.149 | 32.9% | 3/5 |
-| v6_closed_loop_sigma_cutoff_0.18 (it5) | +9.2±2.8° | 67.5±11.2% | 0.397±0.137 | 34.5% | 4/5 |
+### 4.1 最终结果总表
 
-### 骨盆前倾 N=15（关键诊断！）
+| 体态 | 类型 | 最佳配置 | N | hit_band | corr | shape ✅ | 状态 |
+|---|---|---|---|---|---|---|---|
+| **骨盆前倾** (APT, 20°) | 分布内 | v2_dps_s40_**last_quarter** | 15 | **88.7±9.2%** | **+0.407±0.200** | **11/15** | ✅ **成功** |
+| 骨盆前倾 | 同上 | v6_closed_loop_last_quarter | 15 | 81.7±10.5% | +0.311±0.191 | 8/15 | ✅ 公平对比中输给 V2 |
+| 骨盆前倾 | 同上 | v6_closed_loop_second_half | 15 | 69.9±10.7% | +0.328±0.210 | 9/15 | ✅ |
+| 骨盆前倾 | 同上 | v2_dps_s40_**always** | 15 | 49.6±26.3% | +0.037±0.300 | 0/15 | ❌ schedule 选错 (8/15 时间反向) |
+| **膝超伸** (190°) | 数值 OOD | v2_dps_s40_last_quarter | 5 | **0.0%** | 0.060 | 5/5 推力不足 | ❌ **OOD 失败** |
+| 膝超伸 | 同上 | v6_closed_loop_last_quarter | 5 | 0.0% | 0.063 | 5/5 推力不足 | ❌ |
+| **膝弯曲** (125°+stance) | 相位 OOD | v2_dps_s40_last_quarter | 5 | 8.2% | **−0.215±0.142** | 5/5 时间反向 | ❌ **相位 OOD** |
+| 膝弯曲 | 同上 | v6_closed_loop_last_quarter | 5 | 0.0% | +0.347±0.123 | 5/5 推力不足 | ❌ 流形钉住 |
+| 膝弯曲_A (145°+stance) | 相位 OOD（缓和） | v2_dps_s40_last_quarter | 5 | 8.7% | −0.170±0.222 | 3/5 时间反向 | ❌ 仅微改善 |
+| 膝弯曲_B (125°+always) | 相位 OOD（去门控） | v2_dps_s40_last_quarter | 5 | 2.5% | −0.119±0.188 | 4/5 时间反向 | ❌ |
+| 膝弯曲_C (125°+stance, prompt="bent knees") | 相位 OOD + prompt 先验 | v6_closed_loop_last_quarter | 5 | **67.5±39.9%** | +0.059±0.195 | 2/5 时间反向 | ⚠ **意外成功但机制错误** |
 
-| variant | Δ | hit_band | corr | std(corr) | CV(corr) | shape ✅ |
-|---|---|---|---|---|---|---|
-| v2_dps_s40_always | +10.0±2.1° | **87.8±9.4%** | **0.396±0.214** | 0.214 | 54.0% | 11/15 |
-| v6_closed_loop_second_half | +8.8±1.9° | 69.9±10.7% | 0.328±0.210 | 0.210 | 64.1% | 9/15 |
+### 4.2 关键成果（按重要性排序）
 
-**关键洞察**：
-1. **N=5 → N=15 std 翻倍**：原 5 个 seed `{7, 42, 99, 123, 2024}` 是"温顺"样本，N=15 揭示真实方差更大。CV(corr) 从 21%/30% 飙到 54%/64%。
-2. **绝对 std 几乎一致（0.214 vs 0.210）**：V6 和 V2 的"分布形状"没有结构性差异。CV 差异完全来自不同的均值。
-3. **V2 在骨盆前倾上每项指标都赢 V6**：hit_band, corr mean, shape pass rate 都更高。**V6 的 PID 复杂度没换来稳定性优势**。
+**🟢 成果 1：骨盆前倾上 V2_dps_s40_last_quarter 是稳定的 SOTA（N=15 验证）**
+- hit_band 88.7%、corr 0.407、11/15 seed 通过 shape 检查
+- 比 V6 在所有同 schedule 公平对比下都更好（+7% hit, +0.10 corr）
 
-### 跨体态实验（膝超伸，5 seed）
+**🟢 成果 2：schedule 选择是骨盆前倾的最关键超参（影响 > 40% hit）**
+- always 模式：hit=49.6%，CV(corr)=810%，8/15 seed 时间反向
+- last_quarter 模式：hit=88.7%，CV(corr)=49%，0/15 时间反向
+- 推论：**前期高噪声步施压会破坏时序结构，必须等噪声降到一定水平再 guidance**
 
-| variant | Δ | hit_band | corr | shape |
-|---|---|---|---|---|
-| v2_dps_s40_always | +0.57±2.21° | **0.0%** | 0.060 | 5/5 ⚠ 推力不足 |
-| v6_closed_loop_second_half | +0.60±2.31° | **0.0%** | 0.063 | 5/5 ⚠ 推力不足 |
+**🟢 成果 3：发现了 inference-time guidance 的两类失效模式**
+| 失效类型 | 数值 OOD（膝超伸） | 相位 OOD（膝弯曲） |
+|---|---|---|
+| 表象 | 推力不足、Δ≈0 | 时间结构反向、corr<0 |
+| 根因 | 目标角度（190°）从未出现 | 目标角度（125°）只在错误相位出现 |
+| 修复路径 | 改 prompt（已试，失败） | 改 prompt（C 实验，部分有效但机制反） |
+| V2 表现 | 推力不足 | 时序反转 |
+| V6 表现 | 推力不足 | 被流形钉住（推力不足） |
 
-**两个 variant 失败模式完全一致**——这是个关键信号：**问题不在 controller，而在任务本身 OOD**。
+**🟡 成果 4：N=5 → N=15 揭示了"温顺 seed"偏差**
+- 初始 5 个 seed `{7, 42, 99, 123, 2024}` 是低方差子集，掩盖了真实 std
+- N=15 上 CV(corr) 几乎翻倍（21%→54%）；V2 与 V6 的 std 在 N=15 下几乎相等（0.214 vs 0.210），CV 差异完全由均值差决定
+- **结论**：少 seed 实验的稳定性指标不可信，N≥10 是底线
 
-### 关键发现：膝超伸是 OOD 任务
-
-自然走路时膝盖角度在 130-180° 之间，**永远 < 180°**。膝超伸目标 190° 意味着膝盖向后反折——这不在 MDM 的训练分布里。
-
-文本 prompt "a person is walking forward" + MDM 训练分布形成强先验，guidance 梯度根本推不动。**任何 inference-time guidance 方法在 OOD 任务上都会失败**——不是 V6 弱，是 fundamental limit。
+**🟡 成果 5：V6 的工程复杂度没有换来骨盆前倾上的稳定性优势**
+- V6 = PID + Huber + manifold proj + smoothing + EMA + anti-windup（300+ 行）
+- V2 = 一个 step-size + hinge loss（30 行）
+- N=15 上 V2 全面优于 V6；V6 的"精确跟踪能力"在 ±2° tolerance 任务下是过度设计
 
 ---
 
-## 五、当前真正的瓶颈
+## 五、原因剖析
 
-回顾整个项目，"提升 V6 稳定性"这个目标遇到三层障碍：
+### 5.1 为什么 V2 在分布内任务上赢 V6？
 
-### 障碍 1：CV(corr) 是误导性指标
-- N=5 的 21-30% 是 sample bias
-- 真实 std 在 V2 和 V6 上几乎一致（0.21）
-- 用 CV 比较两个均值不同的分布会得出错误结论
-- **建议换指标**：median + IQR, 或 corr>0.3 的 seed 占比
+V6 设计目标是"对抗任意 target 的精确跟踪"，但骨盆前倾任务有两个特点让 V2 的简单设计反而更优：
 
-### 障碍 2：V6 在单体态上没有可量化的优势
-- V2 的简单"固定 s + hinge + 自动停推"反而打过 V6 的 PID
-- Hinge 的"到位即停推"性质恰好契合本任务（≤2° tolerance 容忍区间）
-- V6 的"精确跟踪"能力是过度设计
+1. **任务容忍区间 ±2°，本身是个 hinge 任务**：到位即停推是天然属性。Hinge loss 的 `relu(target - tol - angle)` 在到位后梯度严格为 0，恰好符合需求；Huber 的双侧软推（远=1, 近→0）反而在带内还有残余梯度，扰动已经稳定的解。
+2. **manifold_project 限制了推力上限**：V6 把梯度投影到流形切空间，对"目标在流形内"的任务造成欠推。V2 没这个约束，能多走半步进入容忍带。
 
-### 障碍 3：跨体态选项有限（**新发现，最关键**）
+### 5.2 为什么 OOD 任务在两种 controller 上都失败？
 
-`new/POSTURE_REPRESENTABILITY.md` 写了 22 关节下哪些体态可表征。但还要叠加一层：**MDM 训练分布是否覆盖这个体态**。
+**inference-time guidance 的基本前提**：guidance 梯度只能在 MDM 已学到的概率密度内 reshape，不能把质量推到 zero-density 区域。
 
-| 体态 | 关节表征 | walking 分布内 | 适合跨体态实验 |
+- 膝超伸 190°：训练集中膝关节角度 ∈ [90°, 180°)，190° 是 hard zero density → 梯度推一点回弹一点 → Δ≈0
+- 膝弯曲 125° + stance：训练集中"stance 相 + 125° 膝角"的联合密度 ≈ 0（屈膝主要在 swing 相）→ V2 强推 → 模型"走捷径"把 stance/swing 翻转 → corr<0；V6 拒绝离开流形 → 推力≈0
+
+### 5.3 膝弯曲三个 ablation（A/B/C）告诉我们什么？
+
+| 假说 | 实验 | 结果 | 结论 |
 |---|---|---|---|
-| 骨盆前倾 | ✓ | ✓ | ✅ 已做 |
-| 膝超伸 (190°) | ✓ | ❌ | ❌ OOD，已失败 |
-| 驼背 | △ 弱 | ❌ | ❌ 几乎确定同样失败 |
-| 头前伸 | △ 弱 | △ 看 prompt | △ 风险 |
-| **膝弯曲 (125°)** | ✓ | ✓（慢走） | ✅ **强推荐**，未做 |
-| **躯干前倾** (10°) | ✓ | ✓（快走） | ✅ **强推荐**，未做 |
-| **骨盆侧倾** (5°) | ✓ | ✓（病理步态） | ✅ 未做 |
-| 骨盆后倾 (−5°) | ✓ | ✓ | ✅ 未做 |
+| 目标 125° 太激进 | A: target=145° | corr=−0.170（仍负）| ❌ 不是目标激进度问题 |
+| stance 相位门太严 | B: phase=always | corr=−0.119（仍负）| ❌ 不是相位门问题 |
+| MDM 训练分布是根因 | C: 换 prompt | V2 corr=+0.326，V6 hit=67.5% | ✅ **先验偏移有效但机制反常** |
 
-**当前 registry.py 只注册了骨盆前倾 + 膝超伸 + 驼背**。要做有效的跨体态实验，需要先加注册分布内的体态。
+**C 实验的反常发现**：换 prompt 后 baseline 膝角自然落到 ~100-110°（已 < 125° 目标）。这时：
+- V2 的 hinge loss = 0 → 不工作 → corr 保留（+0.326），但 hit 仍差
+- V6 的 Huber 反向施压（baseline 已"过头"，反推回 125°）→ Δ=+20°（伸膝）→ 偶然停在带内 → hit=67.5%
 
----
-
-## 六、下一步执行优先级
-
-### 优先 1（强推荐）：加分布内体态做真正的跨体态实验
-
-加 **膝弯曲** 和 **躯干前倾** 两个 spec 到 `registry.py`，然后跑 `run_cross_posture.sh`。
-
-每个 spec ≈ 30 行：
-- 膝弯曲 可以直接复用 `signed_knee_angle`，改 target=125, direction="less_than"
-- 躯干前倾 需要新写 `trunk_forward_lean_angle()` in `angle_ops.py`（pelvis-spine1-spine3 sagittal angle）
-
-也要在 `evaluate_ablation_v3.py:29` 的 `ANGLE_TARGETS` dict 加对应行。
-
-### 优先 2（可并行）：OOD 假说快速验证（10 分钟）
-
-把膝超伸的 text prompt 换掉看是否能推动：
-
-```bash
-TEXT_PROMPT="a person stands still with stiff straight legs" \
-POSTURE=膝超伸 SEED=42 \
-GUIDANCE_VARIANT=v2_dps \
-GUIDANCE_KWARGS_JSON='{"s":40.0,"schedule":"always"}' \
-bash new/run_posture_pipeline.sh
-```
-
-如果 hit_band 跳到 30%+ → OOD 假说确认，知道 prompt 怎么挑就能跑更多体态。
-
-### 优先 3：bootstrap CI + median 评估（脚本改动）
-
-`new/aggregate_seeds.py` 加 `scipy.stats.bootstrap` 计算 95% CI，加 median + IQR 输出。这样 N=15 数据有更可信的统计描述（CV 现在的报错信号不可靠）。
-
-### 优先 4（论文 ablation 扩展）：加更多分布内体态
-
-骨盆侧倾、足距过宽、膝内扣（valgus/varus，frontal plane）——这些都是分布内 + 关节强表征。`POSTURE_REPRESENTABILITY.md` 有完整清单。
-
-### 不推荐做的事
-
-- ❌ 继续在骨盆前倾上调 V6 单超参（5 轮迭代已经探到 Pareto 前沿，单参数无突破空间）
-- ❌ 跑驼背 / 膝超伸 / 头前伸（OOD 风险大，预期失败）
-- ❌ 实现 plan 里答应的 time-travel（FreeDoM）——优先级低，先看跨体态结果
-- ❌ 实现 dual-stage hybrid（Huber 早 + hinge 晚）——架构改动大，先用更简单方案
+**这不是 guidance 的成功，是 prompt 做了主要工作，V6 的双向 Huber 把过度弯曲"拉回"到目标附近**。学术上有意思（提示 prompt + guidance 协同方向），但不是当前框架的有效解。
 
 ---
 
-## 七、运行环境
+## 六、什么可以优化 vs 什么是方法固有缺陷
+
+### 6.1 可优化的（工程改进）
+
+| 项 | 当前问题 | 优化路径 | 预期收益 |
+|---|---|---|---|
+| **统计指标** | CV(corr) 在均值不同时误导 | 改用 median + IQR + bootstrap CI | 论文表格更可信 |
+| **V2 step-size 自适应** | 当前固定 s=40，跨体态需要 retune | 加 σ-aware schedule（如 s ∝ σ_t） | 单变体跨任务可用 |
+| **schedule 自动选择** | last_quarter 是手调，骨盆前倾 ✓ 但其他体态未必 | 按 baseline 角度变化幅度自适应选 schedule | 减少 per-task 调参 |
+| **V6 在容忍带内的残余梯度** | Huber 双侧软推在带内还在动 | 在 \|err\| < tol 时 freeze（保留 c_t 但置零 grad）| V6 在分布内任务可能反超 V2 |
+| **OOD 检测** | 跑完才知道是 OOD 失败 | 在 step 1 后计算 \|target - baseline_mean\| / σ_baseline，预警 OOD 风险 | 节省算力 |
+
+### 6.2 方法固有缺陷（inference-time guidance 的基本限制）
+
+这些是**任何 post-hoc guidance 方法都无法解决**的限制，必须改架构（fine-tune / 条件训练）才能突破：
+
+1. **数值 OOD 不可达**（膝超伸 190°）
+   - guidance 只能 reshape MDM 已有分布，不能创造 zero-density 区域的样本
+   - **唯一出路**：fine-tune MDM 使其覆盖目标体态，或用 LoRA 注入新模态
+
+2. **相位-角度联合 OOD 不可达**（膝弯曲 125°+stance）
+   - 即使单独看角度（125°）和相位（stance）都在分布内，它们的**联合**可能不在
+   - guidance 强推会让模型 "swap" 相位标签来满足约束，导致 corr<0
+   - **唯一出路**：相位条件训练（让 MDM 在 stance 时也能生成屈膝）
+
+3. **prompt 先验和 guidance 的耦合不可分离**
+   - C 实验显示，prompt 主导基线分布，guidance 只能在 prompt 给定的局部分布内微调
+   - **唯一出路**：把目标体态直接写进 prompt（"a person walking with anterior pelvic tilt"）训练专门的 prompt-to-posture 模型
+
+4. **guidance 强度 vs 时序保持的 Pareto 边界**
+   - 整个 V1-V6 演化、N=15 sweep 都没能突破 hit↔corr 的同一条 Pareto 前沿
+   - 这是 classifier guidance 的结构性限制：施压越强、扰动越大、时序越差
+   - **唯一出路**：换范式（如 ControlNet 式的条件分支 / RL-tuned diffusion）
+
+### 6.3 现实可行的下一步（如果继续做）
+
+- **优先级 1**：补 3-4 个**真分布内**体态做交叉验证（骨盆侧倾、足距、躯干前倾、膝内扣）。如果都像骨盆前倾一样稳定，论文可以收尾。
+- **优先级 2**：把 OOD 检测做成 pre-run 工具（不需要跑完整 pipeline），提示用户哪些目标是 OOD。
+- **优先级 3**：写 failure-mode 章节作为论文的诚实贡献——展示两类 OOD 失败比展示三个成功更有学术价值。
+- **不做**：继续调 V6 单参数；尝试更激进的 OOD 目标；实现 time-travel/dual-stage 等架构改动。
+
+---
+
+## 七、运行环境（已更新）
 
 ```bash
 conda activate mdm5090
 cd /root/autodl-tmp/motion-diffusion-model
 
-# 单 seed（调试）
-GUIDANCE_VARIANT=v6_closed_loop \
-GUIDANCE_KWARGS_JSON='{"Kp":80,"Ki":1,"Kd":5,"s_min":0.05,"s_max":50,
-                       "I_max":20,"beta_ema":0.8,"lambda_smooth":0.03,
-                       "manifold_project":true,
-                       "loss_form":"huber","huber_delta":0.05,
-                       "normalize_grad":false,"band_gate":false,
-                       "spec_schedule_override":"second_half"}' \
-SEED=42 POSTURE=骨盆前倾 \
-bash new/run_posture_pipeline.sh
-
-# 多 seed sweep (N=5 兼容老脚本)
-bash new/run_seed_robustness.sh
-
-# 多 seed sweep (N=15，新)
+# 骨盆前倾 N=15 (推荐 baseline)
 bash new/run_seed_robustness_n15.sh
 python -m new.aggregate_seeds ./output/n15_*
 
-# 跨体态 sweep (自动适配 deg/meter)
-bash new/run_cross_posture.sh 膝弯曲 5    # ←【需要先加 spec！】
-bash new/run_cross_posture.sh 躯干前倾 5   # ←【需要先加 spec！】
+# 跨体态 sweep — last_quarter schedule（已是默认）
+bash new/run_cross_posture.sh 骨盆前倾 5
+bash new/run_cross_posture.sh 膝弯曲   5   # 失败案例（相位 OOD）
+bash new/run_cross_posture.sh 膝弯曲_A 5   # 缓和目标 ablation
+bash new/run_cross_posture.sh 膝弯曲_B 5   # 去相位门 ablation
+TEXT_PROMPT="a person walking with bent knees" \
+    bash new/run_cross_posture.sh 膝弯曲 5   # prompt 先验 ablation (C)
 python -m new.aggregate_seeds ./output/cross_*
 ```
 
@@ -283,7 +280,10 @@ python -m new.aggregate_seeds ./output/cross_*
 | `3d21aaf` | spec_schedule_override 参数（迭代 4） |
 | `db8b9b8` | sigma_cutoff 参数（迭代 5） |
 | `4de9b41` | 跨体态实验工具 + POSTURE_REPRESENTABILITY.md |
-| (本 commit) | 本 PROJECT_SUMMARY.md |
+| (后续 commits) | 膝弯曲 spec + V6 last_quarter 公平对比脚本 |
+| (后续 commits) | hit_rate_loose 方向感知修复（less_than 任务） |
+| (后续 commits) | 膝弯曲_A/B 相位 OOD 诊断 spec |
+| (本 commit) | README 整合三组体态最终结果 + 原因剖析 |
 
 如果你需要从某个具体迭代 fork 出去对比，`git checkout <commit>` 即可。每个 commit message 都详细记录了改动动机。
 
@@ -291,17 +291,19 @@ python -m new.aggregate_seeds ./output/cross_*
 
 ## 九、给接续者的建议
 
-1. **先读 commit history**：每个 commit message 都自带"为什么这么改"的诊断，按时间读一遍能快速理解 V6 演化逻辑。
+1. **先读 commit history**：每个 commit message 都自带"为什么这么改"的诊断，按时间读一遍能快速理解 V6 演化逻辑和后续的 OOD 诊断过程。
 
-2. **不要再调 V6 在骨盆前倾上的单参数**。Pareto 前沿已经描清楚（hit↔corr trade-off），多花时间无产出。
+2. **不要再调 V6 在骨盆前倾上的单参数**。Pareto 前沿已经描清楚（hit↔corr trade-off），N=15 已经确认 V2_last_quarter 是 SOTA。
 
-3. **首要任务是加分布内的新体态**（膝弯曲 + 躯干前倾），然后做真正的跨体态实验。这才是验证 V6 价值的关键测试。
+3. **不要再尝试膝超伸 / 膝弯曲**。两个失败模式（数值 OOD、相位 OOD）已经完整诊断。继续调参不会改变 inference-time guidance 的基本限制。
 
-4. **统计指标换掉**：CV(corr) 在均值不同时不可信，用 median + IQR + bootstrap CI。
+4. **如果要继续做实验**，加 **分布内** 体态：骨盆侧倾、足距过宽、膝内扣（valgus/varus）、躯干前倾。这些都是分布内且关节强表征，预期能成功，可以扩充骨盆前倾这一个成功案例。
 
-5. **如果跨体态实验 V6 也无优势**：诚实接受 negative result，论文可以写"post-hoc PID guidance 对 in-distribution 单任务 inference-time guidance 收益有限，主要瓶颈在 MDM 训练分布覆盖"。
+5. **统计指标换掉**：CV(corr) 在均值不同时不可信，用 median + IQR + bootstrap CI。`aggregate_seeds.py` 待改。
 
-6. **如果 V6 在跨体态确有优势**：那 V6 的卖点是"无需 per-task 重调 s_max"，V2 在不同体态需要不同 s。
+6. **论文写作建议**：把"两类 OOD 失效模式"作为核心贡献写——比"单任务成功"更有学术价值。inference-time guidance 的 failure mode 在文献中很少有这么完整的分类。
+
+7. **如果项目要突破当前 Pareto 前沿**：必须改架构，不再 post-hoc。可选方向：相位条件训练、ControlNet 式条件分支、prompt + guidance 协同训练。这超出 inference-time guidance scope。
 
 ---
 
@@ -322,5 +324,5 @@ python -m new.aggregate_seeds ./output/cross_*
 
 ---
 
-**总结一句话**：V6 的 PID 闭环架构在工程上完整实现且经过 5 次迭代调试，但实验证明它在骨盆前倾上的稳定性优势是 N=5 sample bias 的假象；真正能区分 V6 vs V2 价值的跨体态实验受限于 MDM 训练分布覆盖，需要先加分布内的新体态（膝弯曲、躯干前倾）才能继续。
+**总结一句话**：V2_dps + schedule=last_quarter 是骨盆前倾任务的 SOTA（N=15: hit=88.7%, corr=0.407）；V6 的 PID 工程复杂度未带来稳定性优势；跨体态扩展（膝超伸=数值 OOD、膝弯曲=相位-角度联合 OOD）揭示了 inference-time guidance 的两类基本失效模式，这是后处理 guidance 范式的**固有限制**而非控制器设计问题。核心成果是骨盆前倾的稳定结果 + 两类 OOD 失效模式的完整诊断，下一步应当是加分布内的新体态（骨盆侧倾、躯干前倾、膝内扣）做交叉验证，或者诚实地把 failure-mode 作为论文主贡献。
 
