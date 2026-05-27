@@ -294,6 +294,63 @@ register_posture(LossSpec(
 # --- 膝超伸（双侧别名，用户可以直接说"膝超伸"） ---
 # 在 controller 里展开成左右两个
 
+# --- 膝弯曲_A：target=145°，station 相位（轻度弯膝步态，分布内） ---
+# 正常站立相膝角 ~160-170°，145° 需要 Δ≈-15~25°，不触发相位反转
+register_posture(LossSpec(
+    name="膝弯曲_A_左",
+    angle_fn=ops.signed_knee_angle,
+    angle_fn_kwargs={"side": "left"},
+    target_deg=145.0,
+    direction="less_than",
+    tolerance_deg=2.0,
+    phase="stance_left",
+    schedule="last_quarter",
+    base_weight=15.0,
+    unit="deg",
+))
+
+register_posture(LossSpec(
+    name="膝弯曲_A_右",
+    angle_fn=ops.signed_knee_angle,
+    angle_fn_kwargs={"side": "right"},
+    target_deg=145.0,
+    direction="less_than",
+    tolerance_deg=2.0,
+    phase="stance_right",
+    schedule="last_quarter",
+    base_weight=15.0,
+    unit="deg",
+))
+
+# --- 膝弯曲_B：target=125°，phase=always（去掉相位门控） ---
+# 原 spec 的相位限制 stance_left/right 与 125° 形成相位-角度矛盾；
+# 改为 always 后 loss 在摆动相自然为 0（角度已 <125°），只在站立相有效
+register_posture(LossSpec(
+    name="膝弯曲_B_左",
+    angle_fn=ops.signed_knee_angle,
+    angle_fn_kwargs={"side": "left"},
+    target_deg=125.0,
+    direction="less_than",
+    tolerance_deg=2.0,
+    phase="always",
+    schedule="last_quarter",
+    base_weight=15.0,
+    unit="deg",
+))
+
+register_posture(LossSpec(
+    name="膝弯曲_B_右",
+    angle_fn=ops.signed_knee_angle,
+    angle_fn_kwargs={"side": "right"},
+    target_deg=125.0,
+    direction="less_than",
+    tolerance_deg=2.0,
+    phase="always",
+    schedule="last_quarter",
+    base_weight=15.0,
+    unit="deg",
+))
+
 # --- 驼背 ---
 register_posture(LossSpec(
     name="驼背",
@@ -326,8 +383,10 @@ register_posture(LossSpec(
 # ============================================================
 
 POSTURE_ALIASES = {
-    "膝超伸": ["膝超伸_左", "膝超伸_右"],
-    "膝弯曲": ["膝弯曲_左", "膝弯曲_右"],
+    "膝超伸":   ["膝超伸_左",   "膝超伸_右"],
+    "膝弯曲":   ["膝弯曲_左",   "膝弯曲_右"],
+    "膝弯曲_A": ["膝弯曲_A_左", "膝弯曲_A_右"],
+    "膝弯曲_B": ["膝弯曲_B_左", "膝弯曲_B_右"],
     "脚不离地": ["脚不离地_左", "脚不离地_右"],
 }
 

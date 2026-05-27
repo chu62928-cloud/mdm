@@ -35,6 +35,12 @@ ANGLE_TARGETS = {
     "膝弯曲":        ("signed_knee_angle_both",   125.0, 2.0,  "less_than"),
     "膝弯曲_左":     ("signed_knee_angle_left",   125.0, 2.0,  "less_than"),
     "膝弯曲_右":     ("signed_knee_angle_right",  125.0, 2.0,  "less_than"),
+    "膝弯曲_A":      ("signed_knee_angle_both",   145.0, 2.0,  "less_than"),  # 实验A：保守目标
+    "膝弯曲_A_左":   ("signed_knee_angle_left",   145.0, 2.0,  "less_than"),
+    "膝弯曲_A_右":   ("signed_knee_angle_right",  145.0, 2.0,  "less_than"),
+    "膝弯曲_B":      ("signed_knee_angle_both",   125.0, 2.0,  "less_than"),  # 实验B：去相位门控
+    "膝弯曲_B_左":   ("signed_knee_angle_left",   125.0, 2.0,  "less_than"),
+    "膝弯曲_B_右":   ("signed_knee_angle_right",  125.0, 2.0,  "less_than"),
     "驼背":          ("spine_posterior_bulge",      0.08, 0.02, "greater_than"),
 }
 
