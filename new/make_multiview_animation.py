@@ -22,6 +22,8 @@ from matplotlib.animation import FuncAnimation, FFMpegWriter, PillowWriter
 from mpl_toolkits.mplot3d import Axes3D  # noqa
 
 from posture_guidance.angle_ops import pelvis_tilt_angle
+# 复用 anatomical 动画的 posture→angle dispatch，避免多视角动画硬编码骨盆角
+from new.make_anatomical_animation import get_angle_fn_and_label, _to_tensor
 
 
 # ===== 配色 =====
@@ -162,6 +164,8 @@ def main():
                          help="人物放大倍数（>1 让骨架占图块更多）")
     parser.add_argument("--line_width", type=float, default=3.5,
                          help="骨架线宽")
+    parser.add_argument("--posture", type=str, default=None,
+                         help="体态名；None 时从 npy 的 posture_instructions 读取")
     args = parser.parse_args()
 
     print(f"Loading {args.npy_path}")
@@ -176,11 +180,18 @@ def main():
         [xyz_base, xyz_guided], scale=args.zoom,
     )
 
-    # 实时骨盆角
-    q_base   = torch.from_numpy(xyz_base).permute(2, 0, 1).float()
-    q_guided = torch.from_numpy(xyz_guided).permute(2, 0, 1).float()
-    angle_base   = (pelvis_tilt_angle(q_base)   * 180 / math.pi).numpy()
-    angle_guided = (pelvis_tilt_angle(q_guided) * 180 / math.pi).numpy()
+    # 实时关节角（按体态自动选择，不再硬编码骨盆角）
+    if args.posture:
+        posture_instructions = [args.posture]
+    else:
+        posture_instructions = data.get("posture_instructions", [])
+    angle_fn, angle_label, angle_unit = get_angle_fn_and_label(posture_instructions)
+    print(f"[multiview angle_fn] {angle_label} ({angle_unit})")
+
+    q_base   = _to_tensor(xyz_base)
+    q_guided = _to_tensor(xyz_guided)
+    angle_base   = angle_fn(q_base)
+    angle_guided = angle_fn(q_guided)
 
     fig = plt.figure(figsize=(15, 10))
     axes = []
@@ -233,8 +244,8 @@ def main():
 
         fig.suptitle(
             f"Frame {t}/{T-1}    "
-            f"Baseline: {angle_base[t]:+.1f}°    "
-            f"Guided: {angle_guided[t]:+.1f}°",
+            f"Baseline {angle_label}: {angle_base[t]:+.1f}{angle_unit}    "
+            f"Guided {angle_label}: {angle_guided[t]:+.1f}{angle_unit}",
             fontsize=13, y=0.97,
         )
 

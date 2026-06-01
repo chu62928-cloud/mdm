@@ -38,6 +38,10 @@ POSTURE_TARGETS = {
     "膝超伸":    ("signed_knee_angle_both",  185.0, 3.0),
     "膝超伸_左": ("signed_knee_angle_left",  185.0, 3.0),
     "膝超伸_右": ("signed_knee_angle_right", 185.0, 3.0),
+    "膝弯曲":    ("signed_knee_angle_both",  125.0, 2.0),
+    "膝弯曲_左": ("signed_knee_angle_left",  125.0, 2.0),
+    "膝弯曲_右": ("signed_knee_angle_right", 125.0, 2.0),
+    "躯干前倾":  ("trunk_forward_lean",      15.0, 2.0),
     "驼背":      ("spine_posterior_bulge",   0.08, 0.02),
 }
 

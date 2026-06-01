@@ -30,6 +30,11 @@ try:
 except ImportError:
     spine_posterior_bulge = None
 
+try:
+    from posture_guidance.angle_ops import trunk_forward_lean
+except ImportError:
+    trunk_forward_lean = None
+
 
 # ========== 配色 ==========
 COLOR_BASELINE_BONE = "#3D4F8F"
@@ -84,12 +89,19 @@ def _wrap_knee_both(q):
 def _wrap_head_forward(q):
     return head_forward_offset(q).numpy()
 
+def _wrap_trunk_lean(q):
+    return (trunk_forward_lean(q) * 180 / math.pi).numpy()
+
 ANGLE_MAP = {
     "骨盆前倾":      (_wrap_pelvis_tilt,  "Pelvic tilt",       "°"),
     "骨盆前倾_深蹲": (_wrap_pelvis_tilt,  "Pelvic tilt",       "°"),
     "膝超伸":        (_wrap_knee_both,    "Knee angle",        "°"),
     "膝超伸_左":     (_wrap_knee_left,    "Left knee",         "°"),
     "膝超伸_右":     (_wrap_knee_right,   "Right knee",        "°"),
+    "膝弯曲":        (_wrap_knee_both,    "Knee angle",        "°"),
+    "膝弯曲_左":     (_wrap_knee_left,    "Left knee",         "°"),
+    "膝弯曲_右":     (_wrap_knee_right,   "Right knee",        "°"),
+    "躯干前倾":      (_wrap_trunk_lean,   "Trunk lean",        "°"),
     "驼背":          (_wrap_kyphosis,     "Spinal bulge",      "m"),
     "头前伸":        (_wrap_head_forward, "Head forward",      "m"),
 }
@@ -100,6 +112,9 @@ def get_angle_fn_and_label(posture_instructions):
     primary = posture_instructions[0]
     if primary in ANGLE_MAP:
         return ANGLE_MAP[primary]
+    # 模糊匹配：注意顺序，"躯干"必须在"骨盆"之前判断（互不包含但保持清晰）
+    if "躯干" in primary and trunk_forward_lean is not None:
+        return _wrap_trunk_lean, "Trunk lean", "°"
     if "骨盆" in primary: return _wrap_pelvis_tilt, "Pelvic tilt", "°"
     if "膝"   in primary: return _wrap_knee_both,   "Knee angle",  "°"
     if "驼背" in primary: return _wrap_kyphosis,    "Spinal bulge","m"
