@@ -722,6 +722,7 @@ class GaussianDiffusion:
                 mu_t=mu_t, x_t=x_t, t_int=t_int, t_tensor=t_tensor, T=T_total,
                 model=model, model_kwargs=model_kwargs,
                 fk_fn=posture_fk_fn,
+                guidance=guidance,
                 guidance_loss_fn=guidance_loss_fn,
                 **variant_kwargs,
             )
@@ -860,9 +861,11 @@ class GaussianDiffusion:
     def _guidance_v2_dps(
         self, *, mu_t, x_t, t_int, t_tensor, T,
         model, model_kwargs, fk_fn, guidance_loss_fn,
+        guidance=None,
         s=30.0, schedule="last_quarter", base_weight=1.0,
         spec_schedule_override=None,
         manifold_project=False, manifold_alpha=1.0,
+        loss_form="hinge", huber_delta=0.05,
     ):
         """
         V2a: DPS-style (Chung et al. NeurIPS 2022).
@@ -917,12 +920,21 @@ class GaussianDiffusion:
 
             # 将外层 schedule 透传给 controller，保持内外一致
             _spec_sched = spec_schedule_override if spec_schedule_override is not None else schedule
-            loss = base_weight * guidance_loss_fn(q, t_int, T, spec_schedule_override=_spec_sched)
+            if loss_form == "huber" and guidance is not None:
+                anchor = q.sum() * 0.0
+                loss = base_weight * guidance.compute_loss(
+                    q, t_int, T,
+                    loss_form="huber",
+                    huber_delta=huber_delta,
+                    spec_schedule_override=_spec_sched,
+                ) + anchor
+            else:
+                loss = base_weight * guidance_loss_fn(q, t_int, T, spec_schedule_override=_spec_sched)
             if loss.grad_fn is None:
                 return mu_t
 
-            # loss=0 说明当前 x0_hat 预测的角度已满足约束，无需推
-            if loss.item() == 0.0:
+            # loss=0 说明当前 x0_hat 预测的角度已满足约束，无需推（仅 hinge 可能为 0）
+            if loss_form == "hinge" and loss.item() == 0.0:
                 return mu_t
 
             grad = th.autograd.grad(loss, x_t_var)[0]
@@ -940,7 +952,7 @@ class GaussianDiffusion:
         grad_norm = grad.norm().item()
         print(f"[V2 UPDATE t={t_int:3d}] loss={loss_val:.4f}  "
               f"grad_norm={grad_norm:.5f}  |s*grad|={delta_mu:.4f}  s={s}  "
-              f"mproj={manifold_project}")
+              f"loss_form={loss_form}  mproj={manifold_project}")
 
         mu_t_new = mu_t.detach() - s * grad
         return mu_t_new
@@ -1245,6 +1257,8 @@ class GaussianDiffusion:
         target_value=None,
         target_unit=None,         # "deg" or other (None → 从 spec 读)
         angle_to_err_scale=1.0,
+        # 消融用：False → c_t=1.0 全程（去掉时衰增益，隔离 c_t 的贡献）
+        use_time_decay=True,
         # diagnostic
         verbose=True,
     ):
@@ -1297,6 +1311,7 @@ class GaussianDiffusion:
                 Kp=Kp, Ki=Ki, Kd=Kd,
                 s_min=s_min, s_max=s_max, I_max=I_max,
                 beta_ema=beta_ema, i_start_frac=i_start_frac,
+                use_time_decay=use_time_decay,
             )
         ctrl = guidance._v6_ctrl
 
