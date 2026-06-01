@@ -274,3 +274,43 @@ def trunk_forward_lean(q: torch.Tensor) -> torch.Tensor:
 
     lean = torch.atan2(forward_proj, upward_proj.clamp(min=EPS))
     return lean   # 正值=前倾，弧度
+
+
+def _sagittal_lean(vec: torch.Tensor, lr_axis: torch.Tensor) -> torch.Tensor:
+    """辅助：把向量 vec 投影到矢状面（去掉 lr_axis 分量），返回与竖直轴夹角（弧度）。"""
+    EPS = 1e-7
+    lr_axis = F.normalize(lr_axis, dim=-1, eps=EPS)
+    lr_component = (vec * lr_axis).sum(dim=-1, keepdim=True) * lr_axis
+    sagittal = vec - lr_component
+    return torch.atan2(sagittal[..., 2], sagittal[..., 1].clamp(min=EPS))
+
+
+def trunk_lean_lower(q: torch.Tensor) -> torch.Tensor:
+    """
+    下段躯干前倾角（髋中点 → spine2，弧度）。
+    用于诊断躯干前倾是"刚体整体前倾"还是"上背胸椎补偿"：
+    下段（腰椎段）参与越多 → 越接近真实整体前倾。
+    """
+    left_hip       = q[..., get_joint_idx("left_hip"),       :]
+    right_hip      = q[..., get_joint_idx("right_hip"),      :]
+    spine2         = q[..., get_joint_idx("spine2"),         :]
+    left_shoulder  = q[..., get_joint_idx("left_shoulder"),  :]
+    right_shoulder = q[..., get_joint_idx("right_shoulder"), :]
+
+    hip_center = (left_hip + right_hip) / 2.0
+    vec = spine2 - hip_center
+    return _sagittal_lean(vec, right_shoulder - left_shoulder)
+
+
+def trunk_lean_upper(q: torch.Tensor) -> torch.Tensor:
+    """
+    上段躯干前倾角（spine2 → 双肩中点，弧度）。
+    上段（胸椎段）前倾远大于下段 → 说明是上背圆弓/胸椎补偿，而非刚体前倾。
+    """
+    spine2         = q[..., get_joint_idx("spine2"),         :]
+    left_shoulder  = q[..., get_joint_idx("left_shoulder"),  :]
+    right_shoulder = q[..., get_joint_idx("right_shoulder"), :]
+
+    shoulder_center = (left_shoulder + right_shoulder) / 2.0
+    vec = shoulder_center - spine2
+    return _sagittal_lean(vec, right_shoulder - left_shoulder)

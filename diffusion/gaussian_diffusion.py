@@ -862,6 +862,7 @@ class GaussianDiffusion:
         model, model_kwargs, fk_fn, guidance_loss_fn,
         s=30.0, schedule="last_quarter", base_weight=1.0,
         spec_schedule_override=None,
+        manifold_project=False, manifold_alpha=1.0,
     ):
         """
         V2a: DPS-style (Chung et al. NeurIPS 2022).
@@ -876,6 +877,10 @@ class GaussianDiffusion:
             schedule     : 建议用 'last_quarter' 或 'final'。
                            'always' 在高噪声步（t>12）loss=0，grad=0，白跑一次 MDM forward。
             base_weight  : 在 guidance_loss_fn 里已经乘了，这里保持 1.0。
+            manifold_project : 【消融用】是否对 grad 做 MPGD 正交投影（剥离 x0_hat 方向分量）。
+                           默认 False = 原始 V2 行为。设 True 可单独隔离"流形投影"这一项的
+                           贡献，用于 V6 vs V2 的受控消融（其余 PID/Huber/平滑均不引入）。
+            manifold_alpha : 投影强度 ∈ [0,1]，1.0 = 完全投影。
 
         与 V1 的效果差异根因：
             V1 用 15 步 inner loop，每步推 lr * base_weight * grad；
@@ -922,13 +927,22 @@ class GaussianDiffusion:
 
             grad = th.autograd.grad(loss, x_t_var)[0]
 
-        loss_val  = loss.item()
-        delta_mu  = (s * grad.detach()).norm().item()
-        grad_norm = grad.detach().norm().item()
-        print(f"[V2 UPDATE t={t_int:3d}] loss={loss_val:.4f}  "
-              f"grad_norm={grad_norm:.5f}  |s*grad|={delta_mu:.4f}  s={s}")
+        grad = grad.detach()
 
-        mu_t_new = mu_t.detach() - s * grad.detach()
+        # 【消融用】MPGD 流形正交投影：剥离梯度中沿 x0_hat 的分量
+        # 与 V6 使用同一个 orthogonal_project，确保对比口径一致
+        if manifold_project:
+            from posture_guidance.closed_loop_controller import orthogonal_project
+            grad = orthogonal_project(grad, x0_hat.detach(), alpha=manifold_alpha)
+
+        loss_val  = loss.item()
+        delta_mu  = (s * grad).norm().item()
+        grad_norm = grad.norm().item()
+        print(f"[V2 UPDATE t={t_int:3d}] loss={loss_val:.4f}  "
+              f"grad_norm={grad_norm:.5f}  |s*grad|={delta_mu:.4f}  s={s}  "
+              f"mproj={manifold_project}")
+
+        mu_t_new = mu_t.detach() - s * grad
         return mu_t_new
 
     # ------------------------------------------------------------
