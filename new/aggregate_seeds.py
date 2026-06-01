@@ -32,7 +32,9 @@ def main():
     # 自动推断 posture（避免漏传 --posture 把数据按错误目标评估）
     if args.posture is None:
         first = __import__('pathlib').Path(args.seedtest_dirs[0]).name.lower()
-        if "flex_b" in first or "膝弯曲_b" in first:
+        if "trunk" in first or "躯干前倾" in first:
+            args.posture = "躯干前倾"
+        elif "flex_b" in first or "膝弯曲_b" in first:
             args.posture = "膝弯曲_B"
         elif "flex_a" in first or "膝弯曲_a" in first:
             args.posture = "膝弯曲_A"

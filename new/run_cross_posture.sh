@@ -26,7 +26,7 @@ set -e
 
 if [ -z "$1" ]; then
     echo "用法: bash new/run_cross_posture.sh <体态> [N_SEEDS]"
-    echo "支持体态: 膝超伸 | 膝弯曲 | 膝弯曲_A | 膝弯曲_B | 骨盆前倾 | 驼背 | 头前伸"
+    echo "支持体态: 膝超伸 | 膝弯曲 | 膝弯曲_A | 膝弯曲_B | 骨盆前倾 | 躯干前倾 | 驼背 | 头前伸"
     exit 1
 fi
 
@@ -41,13 +41,13 @@ case "$POSTURE" in
         echo "⚠  $POSTURE 是 meter 单位，且为'弱可表征'体态（见 POSTURE_REPRESENTABILITY.md）"
         echo "   预期 hit_band/corr 比强可表征体态差，仅作参照。"
         ;;
-    膝超伸|膝弯曲|膝弯曲_A|膝弯曲_B|骨盆前倾|骨盆前倾_深蹲)
+    膝超伸|膝弯曲|膝弯曲_A|膝弯曲_B|骨盆前倾|骨盆前倾_深蹲|躯干前倾)
         UNIT_TAG="deg"
         HUBER_DELTA="0.05"
         ;;
     *)
         echo "未知体态 '$POSTURE'。退出。"
-        echo "支持: 膝超伸 | 膝弯曲 | 骨盆前倾 | 驼背 | 头前伸"
+        echo "支持: 膝超伸 | 膝弯曲 | 骨盆前倾 | 躯干前倾 | 驼背 | 头前伸"
         exit 1
         ;;
 esac
@@ -76,6 +76,7 @@ case "$POSTURE" in
     膝弯曲)       OUT_TAG="knee_flex" ;;
     膝弯曲_A)     OUT_TAG="knee_flex_a" ;;
     膝弯曲_B)     OUT_TAG="knee_flex_b" ;;
+    躯干前倾)     OUT_TAG="trunk_lean" ;;
     驼背)         OUT_TAG="kyphosis" ;;
     头前伸)       OUT_TAG="fhp" ;;
     *)            OUT_TAG="$POSTURE" ;;

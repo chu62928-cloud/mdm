@@ -237,3 +237,40 @@ def head_forward_offset(q: torch.Tensor) -> torch.Tensor:
 
     # 假设 z 轴是前方
     return (head[..., 2] - neck[..., 2])
+
+
+def trunk_forward_lean(q: torch.Tensor) -> torch.Tensor:
+    """
+    躯干前倾角（髋中点 → 双肩中点向量，矢状面投影与竖直轴的夹角）。
+    正值 = 前倾，0 = 直立，负值 = 后仰。
+
+    定义：把整个上半身视为一个刚段，从骨盆（hip_center）到双肩中点，
+    测量该向量在矢状面上偏离竖直方向的角度。
+    与 pelvis_tilt_angle 的区别：APT 测骨盆自身的矢状面转角；
+    本函数测整个躯干段的倾斜，对应 Parkinson's 前倾步态、老年屈曲步态。
+    与 head_forward_offset 的区别：后者是头部相对颈椎的局部偏移（米），
+    本函数是整个上半身的全局倾角（弧度）。
+    """
+    EPS = 1e-7
+
+    left_hip       = q[..., get_joint_idx("left_hip"),        :]
+    right_hip      = q[..., get_joint_idx("right_hip"),       :]
+    left_shoulder  = q[..., get_joint_idx("left_shoulder"),   :]
+    right_shoulder = q[..., get_joint_idx("right_shoulder"),  :]
+
+    hip_center      = (left_hip + right_hip) / 2.0
+    shoulder_center = (left_shoulder + right_shoulder) / 2.0
+
+    trunk_vec = shoulder_center - hip_center                   # (..., 3)
+
+    # 投影到矢状面：去掉左右分量（与 pelvis_tilt_angle 同逻辑）
+    lr_axis = right_shoulder - left_shoulder
+    lr_axis = F.normalize(lr_axis, dim=-1, eps=EPS)
+    lr_component = (trunk_vec * lr_axis).sum(dim=-1, keepdim=True) * lr_axis
+    sagittal_vec = trunk_vec - lr_component
+
+    forward_proj = sagittal_vec[..., 2]            # z = 前后
+    upward_proj  = sagittal_vec[..., 1]            # y = 上下
+
+    lean = torch.atan2(forward_proj, upward_proj.clamp(min=EPS))
+    return lean   # 正值=前倾，弧度

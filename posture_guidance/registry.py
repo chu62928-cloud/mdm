@@ -351,6 +351,21 @@ register_posture(LossSpec(
     unit="deg",
 ))
 
+# --- 躯干前倾（全身性前倾，髋中点→双肩中点矢状面夹角） ---
+# 正常快走约 5-10°，病理性前倾（Parkinson's、老年屈曲步态）约 15-30°
+# phase=always：全步态周期躯干均前倾，无相位冲突（不同于膝弯曲在站立相的相位-角度矛盾）
+register_posture(LossSpec(
+    name="躯干前倾",
+    angle_fn=ops.trunk_forward_lean,
+    target_deg=15.0,
+    direction="greater_than",
+    tolerance_deg=2.0,
+    phase="always",
+    schedule="last_quarter",
+    base_weight=20.0,
+    unit="deg",
+))
+
 # --- 驼背 ---
 register_posture(LossSpec(
     name="驼背",
