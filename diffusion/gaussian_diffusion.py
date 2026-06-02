@@ -866,6 +866,7 @@ class GaussianDiffusion:
         spec_schedule_override=None,
         manifold_project=False, manifold_alpha=1.0,
         loss_form="hinge", huber_delta=0.05,
+        sigma_schedule="constant",  # "constant" | "linear_decay" | "sqrt_decay"
     ):
         """
         V2a: DPS-style (Chung et al. NeurIPS 2022).
@@ -947,14 +948,31 @@ class GaussianDiffusion:
             from posture_guidance.closed_loop_controller import orthogonal_project
             grad = orthogonal_project(grad, x0_hat.detach(), alpha=manifold_alpha)
 
+        # σ-aware step size: scale s by denoising progress
+        if sigma_schedule != "constant":
+            sigma_t = float(self.posterior_variance[t_int]) ** 0.5
+            sigma_max = float(max(self.posterior_variance)) ** 0.5
+            sigma_min = float(min(v for v in self.posterior_variance if v > 0)) ** 0.5
+            sigma_range = max(sigma_max - sigma_min, 1e-6)
+            progress = max(0.0, min(1.0, (sigma_max - sigma_t) / sigma_range))
+            if sigma_schedule == "linear_decay":
+                c_t = progress
+            elif sigma_schedule == "sqrt_decay":
+                c_t = progress ** 0.5
+            else:
+                c_t = 1.0
+            s_eff = s * c_t
+        else:
+            s_eff = s
+
         loss_val  = loss.item()
-        delta_mu  = (s * grad).norm().item()
+        delta_mu  = (s_eff * grad).norm().item()
         grad_norm = grad.norm().item()
         print(f"[V2 UPDATE t={t_int:3d}] loss={loss_val:.4f}  "
-              f"grad_norm={grad_norm:.5f}  |s*grad|={delta_mu:.4f}  s={s}  "
-              f"loss_form={loss_form}  mproj={manifold_project}")
+              f"grad_norm={grad_norm:.5f}  |s*grad|={delta_mu:.4f}  s_eff={s_eff:.2f}  "
+              f"loss_form={loss_form}  sigma_sched={sigma_schedule}  mproj={manifold_project}")
 
-        mu_t_new = mu_t.detach() - s * grad
+        mu_t_new = mu_t.detach() - s_eff * grad
         return mu_t_new
 
     # ------------------------------------------------------------
@@ -1259,6 +1277,8 @@ class GaussianDiffusion:
         angle_to_err_scale=1.0,
         # 消融用：False → c_t=1.0 全程（去掉时衰增益，隔离 c_t 的贡献）
         use_time_decay=True,
+        # 容差带内冻结：|err| < tol 的样本置零梯度，避免 Huber 在带内持续扰动
+        freeze_in_band=False,
         # diagnostic
         verbose=True,
     ):
@@ -1420,6 +1440,16 @@ class GaussianDiffusion:
         else:
             # 默认路径（迭代 3）：raw grad，让 Huber 的有界自调节梯度起效
             grad_for_step = grad
+
+        # 容差带冻结：在带内的样本梯度置零，避免 Huber 双侧软推持续扰动已收敛的结果
+        if freeze_in_band:
+            tol_rad = spec0.tolerance_deg * (math.pi / 180.0 if spec0.unit == "deg" else 1.0)
+            in_band = (err.abs() < tol_rad)      # (B,) bool
+            if in_band.any():
+                mask = (~in_band).float().view(*gn_shape)
+                grad_for_step = grad_for_step * mask
+                if verbose:
+                    print(f"  [freeze_in_band] {in_band.sum().item()}/{B} samples frozen")
 
         delta = s_t.view(*gn_shape) * grad_for_step
 
