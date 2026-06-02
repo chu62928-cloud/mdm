@@ -49,6 +49,8 @@ def main():
         first = Path(args.seedtest_dirs[0]).name.lower()
         if "trunk" in first or "躯干前倾" in first:
             args.posture = "躯干前倾"
+        elif "pelvic_tilt_lat" in first or "骨盆侧倾" in first:
+            args.posture = "骨盆侧倾"
         elif "flex_b" in first or "膝弯曲_b" in first:
             args.posture = "膝弯曲_B"
         elif "flex_a" in first or "膝弯曲_a" in first:

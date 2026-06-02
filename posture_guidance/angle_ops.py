@@ -314,3 +314,36 @@ def trunk_lean_upper(q: torch.Tensor) -> torch.Tensor:
     shoulder_center = (left_shoulder + right_shoulder) / 2.0
     vec = shoulder_center - spine2
     return _sagittal_lean(vec, right_shoulder - left_shoulder)
+
+
+def pelvis_lateral_tilt(q: torch.Tensor) -> torch.Tensor:
+    """
+    骨盆侧倾角（冠状面内，左右髋连线与水平面的夹角）。
+
+    定义：
+        tilt = asin(Δy_hip / hip_width)
+        Δy_hip = right_hip.y − left_hip.y
+        hip_width = ‖right_hip − left_hip‖
+
+    正值 = 右髋高于左髋（左侧 Trendelenburg 模式：左臀中肌无力时骨盆向左倾）
+    负值 = 左髋高于右髋（右侧 Trendelenburg）
+    0   = 骨盆水平
+
+    注：正常步态中骨盆侧倾以步态周期振荡（单侧约 ±3-5°，均值≈0°）。
+    病态 Trendelenburg 步态特征是存在系统性均值偏移（均值 > 3-5°）。
+
+    Args:
+        q: (..., J, 3) 全局关节坐标，HumanML3D 约定 y=上，z=前，x=右
+    Returns:
+        tilt: (...,) 弧度，正值 = 右髋高
+    """
+    EPS_L = 1e-6
+    left_hip  = q[..., get_joint_idx("left_hip"),  :]
+    right_hip = q[..., get_joint_idx("right_hip"), :]
+
+    vec       = right_hip - left_hip              # (..., 3)
+    delta_y   = vec[..., 1]                       # 垂直分量（y 轴）
+    hip_width = vec.norm(dim=-1).clamp(min=EPS_L)  # 完整距离（包含前后分量更稳健）
+
+    tilt = torch.asin((delta_y / hip_width).clamp(-1 + EPS_L, 1 - EPS_L))
+    return tilt

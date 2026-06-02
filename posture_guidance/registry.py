@@ -366,6 +366,22 @@ register_posture(LossSpec(
     unit="deg",
 ))
 
+# --- 骨盆侧倾（Trendelenburg 步态，右髋高） ---
+# 正常步态均值≈0°（双侧对称振荡）；病态 Trendelenburg 均值 > 3-5°（系统性单侧偏移）
+# 目标 5°：mild Trendelenburg，分布边界但仍在 MDM 训练集范围内
+# phase=always：全步态周期均需系统性偏移（不只在某一相）
+register_posture(LossSpec(
+    name="骨盆侧倾",
+    angle_fn=ops.pelvis_lateral_tilt,
+    target_deg=5.0,
+    direction="greater_than",
+    tolerance_deg=1.0,
+    phase="always",
+    schedule="last_quarter",
+    base_weight=20.0,
+    unit="deg",
+))
+
 # --- 驼背 ---
 register_posture(LossSpec(
     name="驼背",

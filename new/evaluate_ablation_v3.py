@@ -42,6 +42,7 @@ ANGLE_TARGETS = {
     "膝弯曲_B_左":   ("signed_knee_angle_left",   125.0, 2.0,  "less_than"),
     "膝弯曲_B_右":   ("signed_knee_angle_right",  125.0, 2.0,  "less_than"),
     "躯干前倾":       ("trunk_forward_lean",          15.0, 2.0,  "greater_than"),
+    "骨盆侧倾":       ("pelvis_lateral_tilt",          5.0, 1.0,  "greater_than"),
     "驼背":          ("spine_posterior_bulge",      0.08, 0.02, "greater_than"),
 }
 
