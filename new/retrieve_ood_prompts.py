@@ -32,8 +32,12 @@ from pathlib import Path
 import numpy as np
 import torch
 
+import torch.nn.functional as F
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from posture_guidance.angle_ops import signed_knee_angle
+from posture_guidance.joint_indices import get_joint_idx
+
+EPS = 1e-7
 
 
 # ──────────────────────────────────────────────────────────
@@ -72,20 +76,46 @@ def load_texts(text_path: Path) -> list:
     return texts
 
 
+def upright_mask(q: torch.Tensor, min_height: float = 0.5) -> np.ndarray:
+    """返回直立帧 bool mask (T,)：hip.y > knee.y > ankle.y 且高度差 > min_height。"""
+    hip_y   = (q[:, get_joint_idx("left_hip"),   1] + q[:, get_joint_idx("right_hip"),   1]) / 2
+    knee_y  = (q[:, get_joint_idx("left_knee"),  1] + q[:, get_joint_idx("right_knee"),  1]) / 2
+    ankle_y = (q[:, get_joint_idx("left_ankle"), 1] + q[:, get_joint_idx("right_ankle"), 1]) / 2
+    return ((hip_y > knee_y) & (knee_y > ankle_y) & ((hip_y - ankle_y) > min_height)).numpy()
+
+
+def three_point_angle_deg(q: torch.Tensor, ja: str, jb: str, jc: str) -> np.ndarray:
+    """jb 为顶点，返回 (T,) ndarray（度，范围 [0°, 180°]）。180° = 完全伸直。"""
+    a = q[:, get_joint_idx(ja), :]
+    b = q[:, get_joint_idx(jb), :]
+    c = q[:, get_joint_idx(jc), :]
+    ba = F.normalize(a - b, dim=-1, eps=EPS)
+    bc = F.normalize(c - b, dim=-1, eps=EPS)
+    cos_a = (ba * bc).sum(-1).clamp(-1 + EPS, 1 - EPS)
+    return torch.acos(cos_a).numpy() * (180.0 / math.pi)
+
+
 def clip_knee_score(q: torch.Tensor) -> float:
     """
-    返回 clip 的膝角分数（度）：左右膝的最大值。
-    用 P95（而非全局 max）减少异常帧的影响。
+    返回 clip 的膝角分数（度）：直立帧中左右膝三点角的 P95 最大值。
+    三点角定义 180° = 完全伸直，越接近 180° = 腿越直（目标状态）。
+
+    只在直立帧（hip > knee > ankle，高度差 > 0.5m）上计算，
+    避免坐/躺/踢腿姿势污染结果。
     """
-    with torch.no_grad():
-        left  = signed_knee_angle(q, side="left").numpy()   # (T,) rad
-        right = signed_knee_angle(q, side="right").numpy()  # (T,) rad
-    # 取 P95（而非 max），对噪声帧更鲁棒
-    score_deg = max(
-        float(np.percentile(left,  95)) * 180.0 / math.pi,
-        float(np.percentile(right, 95)) * 180.0 / math.pi,
-    )
-    return score_deg
+    mask = upright_mask(q)
+    n_up = int(mask.sum())
+
+    if n_up < 5:
+        # 直立帧太少，用全帧但给低分（避免非行走 clip 排名过高）
+        left  = three_point_angle_deg(q, "left_hip",  "left_knee",  "left_ankle")
+        right = three_point_angle_deg(q, "right_hip", "right_knee", "right_ankle")
+        return max(float(np.percentile(left, 95)), float(np.percentile(right, 95))) - 20.0
+
+    q_up  = q[mask]
+    left  = three_point_angle_deg(q_up, "left_hip",  "left_knee",  "left_ankle")
+    right = three_point_angle_deg(q_up, "right_hip", "right_knee", "right_ankle")
+    return max(float(np.percentile(left, 95)), float(np.percentile(right, 95)))
 
 
 # ──────────────────────────────────────────────────────────
