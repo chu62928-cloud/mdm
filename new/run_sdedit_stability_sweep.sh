@@ -1,28 +1,36 @@
 #!/usr/bin/env bash
 # new/run_sdedit_stability_sweep.sh
 #
-# 路线 B 第二阶段：稳定性修复 + Route C 扫描
+# 路线 B 第二阶段：稳定性修复 + Route C 扫描（50 步模型重标定版）
 #
-# 第一轮结果（t0 sweep）关键发现：
+# 第一轮结果（t0 sweep，humanml_trans_dec_512_bert-50steps）：
 #   - 纯 SDEdit：完全失败（MDM 去噪抹掉 IK 结构）
 #   - v6hybrid t0=0.3：hit_band=14.8%（最佳）但 2/5 seeds 过度推力，CV(Δ)=22.1%
 #   - v6hybrid t0=0.5：稳定（CV=8.8%）但 hit_band=1.7%（过低）
 #   - v6hybrid t0=0.7：NaN，发散
 #
 # 根本原因（t0=0.3 不稳定）：
-#   spec_schedule_override="last_quarter" 在 SDEdit(300 步)中覆盖 250/300=83% 步，
-#   高噪声步（t=250-300）梯度方向不可靠 → PID 积分失控 → 过推。
+#   T_total=50，spec_schedule_override="last_quarter" 在 t<12 步激活引导。
+#   t0=0.3 去噪窗口 = t=14→0（15 步），引导覆盖 12/15=80%。
+#   高噪声步（t=10,11，σ≈0.135-0.143）梯度方向不可靠 → PID 积分失控 → 过推。
+#
+# 50 步 cosine schedule 实测 σ=sqrt(posterior_variance)（关键值）：
+#   t=11: σ=0.1428   t=10: σ=0.1351   t=9: σ=0.1272
+#   t=8:  σ=0.1188   t=7:  σ=0.1101   t=0: σ=0.0000
+#   → sigma_cutoff=0.13 跳过 t=10,11（σ>0.13）的引导步
+#   → 旧值 0.4 完全无效（t0=0.3 窗口所有步 σ≤0.1648，永不触发）
 #
 # 本轮实验矩阵：
 #   t0 = 0.30（不稳定区）× 6 变体
+#        0.25（低 t0，保更多 IK 结构）× 1 变体（stable）
 #        0.35 / 0.40（甜点探索）× 1 变体（stable）
 #        0.50（稳定基线参照）× 1 变体（stable）
 #
 # 变体说明：
 #   base        — 复现第一轮 v6hybrid（对照）
 #   delta_max   — +delta_max=5.0（单步限幅）
-#   sigma_cut   — +sigma_cutoff=0.4（跳过高噪步）
-#   stable      — delta_max + sigma_cutoff（组合）
+#   sigma_cut   — +sigma_cutoff=0.13（跳过 t=10,11 高噪步，已重标定）
+#   stable      — delta_max + sigma_cutoff=0.13 + Ki=0.5（积分增益减半）
 #   sup01       — stable + score_suppress_ratio=0.1（Route C 弱）
 #   sup02       — stable + score_suppress_ratio=0.2（Route C 中）
 #
@@ -51,39 +59,45 @@ ALL_SEEDS=(7 42 99 123 2024 17 23 88 251 333 666 777 1337 9999 10000)
 SEEDS=("${ALL_SEEDS[@]:0:$N_SEEDS}")
 
 # ---- V6 kwargs（用 declare -A 避免 JSON 冒号与字段分隔符冲突） ----
+# sigma_cutoff=0.13 经 50 步 cosine schedule 实测标定：
+#   跳过 t=10(σ=0.135) 和 t=11(σ=0.143) 两个最不可靠的引导步
+# Ki=0.5（stable 系列）：积分增益减半，防止梯度不可靠步的积分累积
 declare -A KWARGS_MAP
 
 KWARGS_MAP["base"]='{"Kp":80,"Ki":1,"Kd":5,"s_min":0.05,"s_max":50,"I_max":20,"beta_ema":0.8,"lambda_smooth":0.03,"manifold_project":false,"loss_form":"huber","huber_delta":0.05,"normalize_grad":false,"band_gate":false,"spec_schedule_override":"last_quarter"}'
 
 KWARGS_MAP["delta_max"]='{"Kp":80,"Ki":1,"Kd":5,"s_min":0.05,"s_max":50,"I_max":20,"beta_ema":0.8,"lambda_smooth":0.03,"manifold_project":false,"loss_form":"huber","huber_delta":0.05,"normalize_grad":false,"band_gate":false,"spec_schedule_override":"last_quarter","delta_max":5.0}'
 
-KWARGS_MAP["sigma_cut"]='{"Kp":80,"Ki":1,"Kd":5,"s_min":0.05,"s_max":50,"I_max":20,"beta_ema":0.8,"lambda_smooth":0.03,"manifold_project":false,"loss_form":"huber","huber_delta":0.05,"normalize_grad":false,"band_gate":false,"spec_schedule_override":"last_quarter","sigma_cutoff":0.4}'
+KWARGS_MAP["sigma_cut"]='{"Kp":80,"Ki":1,"Kd":5,"s_min":0.05,"s_max":50,"I_max":20,"beta_ema":0.8,"lambda_smooth":0.03,"manifold_project":false,"loss_form":"huber","huber_delta":0.05,"normalize_grad":false,"band_gate":false,"spec_schedule_override":"last_quarter","sigma_cutoff":0.13}'
 
-KWARGS_MAP["stable"]='{"Kp":80,"Ki":1,"Kd":5,"s_min":0.05,"s_max":50,"I_max":20,"beta_ema":0.8,"lambda_smooth":0.03,"manifold_project":false,"loss_form":"huber","huber_delta":0.05,"normalize_grad":false,"band_gate":false,"spec_schedule_override":"last_quarter","delta_max":5.0,"sigma_cutoff":0.4}'
+KWARGS_MAP["stable"]='{"Kp":80,"Ki":0.5,"Kd":5,"s_min":0.05,"s_max":50,"I_max":20,"beta_ema":0.8,"lambda_smooth":0.03,"manifold_project":false,"loss_form":"huber","huber_delta":0.05,"normalize_grad":false,"band_gate":false,"spec_schedule_override":"last_quarter","delta_max":5.0,"sigma_cutoff":0.13}'
 
-KWARGS_MAP["sup01"]='{"Kp":80,"Ki":1,"Kd":5,"s_min":0.05,"s_max":50,"I_max":20,"beta_ema":0.8,"lambda_smooth":0.03,"manifold_project":false,"loss_form":"huber","huber_delta":0.05,"normalize_grad":false,"band_gate":false,"spec_schedule_override":"last_quarter","delta_max":5.0,"sigma_cutoff":0.4,"score_suppress_ratio":0.1}'
+KWARGS_MAP["sup01"]='{"Kp":80,"Ki":0.5,"Kd":5,"s_min":0.05,"s_max":50,"I_max":20,"beta_ema":0.8,"lambda_smooth":0.03,"manifold_project":false,"loss_form":"huber","huber_delta":0.05,"normalize_grad":false,"band_gate":false,"spec_schedule_override":"last_quarter","delta_max":5.0,"sigma_cutoff":0.13,"score_suppress_ratio":0.1}'
 
-KWARGS_MAP["sup02"]='{"Kp":80,"Ki":1,"Kd":5,"s_min":0.05,"s_max":50,"I_max":20,"beta_ema":0.8,"lambda_smooth":0.03,"manifold_project":false,"loss_form":"huber","huber_delta":0.05,"normalize_grad":false,"band_gate":false,"spec_schedule_override":"last_quarter","delta_max":5.0,"sigma_cutoff":0.4,"score_suppress_ratio":0.2}'
+KWARGS_MAP["sup02"]='{"Kp":80,"Ki":0.5,"Kd":5,"s_min":0.05,"s_max":50,"I_max":20,"beta_ema":0.8,"lambda_smooth":0.03,"manifold_project":false,"loss_form":"huber","huber_delta":0.05,"normalize_grad":false,"band_gate":false,"spec_schedule_override":"last_quarter","delta_max":5.0,"sigma_cutoff":0.13,"score_suppress_ratio":0.2}'
 
 # ---- 实验矩阵：(variant, t0) pairs ----
 # 格式：每个元素 = "variant_name t0_value"
 EXPERIMENTS=(
-    "base    0.30"
+    "base      0.30"
     "delta_max 0.30"
     "sigma_cut 0.30"
-    "stable  0.30"
-    "sup01   0.30"
-    "sup02   0.30"
-    "stable  0.35"
-    "stable  0.40"
-    "stable  0.50"
+    "stable    0.30"
+    "sup01     0.30"
+    "sup02     0.30"
+    "stable    0.25"
+    "stable    0.35"
+    "stable    0.40"
+    "stable    0.50"
 )
 
 echo "================================================="
 echo "  路线 B 第二阶段：稳定性修复 + Route C 扫描"
+echo "  模型：humanml_trans_dec_512_bert-50steps（T=50）"
 echo "  目标膝角 = ${TARGET_DEG}°"
 echo "  N_SEEDS = ${N_SEEDS}"
 echo "  实验数 = ${#EXPERIMENTS[@]} × ${N_SEEDS} seeds = $(( ${#EXPERIMENTS[@]} * N_SEEDS ))"
+echo "  sigma_cutoff 重标定：0.4→0.13（跳过 t=10,11，σ>0.13）"
 echo "================================================="
 
 run_one () {
@@ -112,7 +126,7 @@ run_one () {
 for EXP in "${EXPERIMENTS[@]}"; do
     read -r VNAME T0 <<< "${EXP}"
     echo ""
-    echo "-- [${VNAME} t0=${T0}]  kwargs=${KWARGS_MAP[$VNAME]:0:60}..."
+    echo "-- [${VNAME} t0=${T0}]  kwargs=${KWARGS_MAP[$VNAME]:0:80}..."
     for SEED in "${SEEDS[@]}"; do
         run_one "${VNAME}" "${T0}" "${SEED}"
     done
@@ -131,4 +145,5 @@ echo ""
 echo "  预期最优：stable_t030 或 sup01_t030"
 echo "    若 score_suppress 提升 hit_band → Route C 对 OOD 生成有效"
 echo "    若 stable_t030 CV < 10% 且 hit_band ≈ base → 稳定+性能两全"
+echo "    若 stable_t025 hit_band > stable_t030 → 低 t0 保 IK 结构更重要"
 echo "================================================="
