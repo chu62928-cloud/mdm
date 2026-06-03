@@ -1279,6 +1279,12 @@ class GaussianDiffusion:
         use_time_decay=True,
         # 容差带内冻结：|err| < tol 的样本置零梯度，避免 Huber 在带内持续扰动
         freeze_in_band=False,
+        # ---- 路线 C：score suppression ----
+        # 在 t/T < score_suppress_ratio 的低噪声步，把 MDM posterior mu_t
+        # 向 x_t 渐进混合（权重 1-frac/ratio → frac=0 时完全用 x_t），
+        # 削弱训练分布的"自愈"拉力，让 guidance delta 相对更强。
+        # 0.0 = 不抑制（默认，行为不变）；推荐 0.1-0.2 做 OOD 实验。
+        score_suppress_ratio=0.0,
         # diagnostic
         verbose=True,
     ):
@@ -1470,7 +1476,20 @@ class GaussianDiffusion:
                 f"{', clip' if delta_max is not None else ''})"
             )
 
-        return mu_t.detach() - delta
+        # ---- Route C: score suppression at low-noise steps ----
+        # At t→0, MDM posterior strongly pulls x toward training distribution.
+        # Blend mu_t toward x_t so guidance gradient has more relative influence.
+        mu_base = mu_t.detach()
+        if score_suppress_ratio > 0.0:
+            frac = t_int / T  # 1.0=pure noise, 0.0=clean
+            if frac < score_suppress_ratio:
+                suppress_w = 1.0 - frac / score_suppress_ratio  # 1 at t=0, 0 at boundary
+                mu_base = (1.0 - suppress_w) * mu_base + suppress_w * x_t.detach()
+                if verbose:
+                    print(f"  [score-suppress] t={t_int} suppress_w={suppress_w:.3f} "
+                          f"(frac={frac:.3f} < ratio={score_suppress_ratio:.3f})")
+
+        return mu_base - delta
 
     # ============================================================
     # DDIM sampling (unchanged)
