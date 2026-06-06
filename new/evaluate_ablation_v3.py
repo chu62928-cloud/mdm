@@ -44,6 +44,9 @@ ANGLE_TARGETS = {
     "躯干前倾":       ("trunk_forward_lean",          15.0, 2.0,  "greater_than"),
     "骨盆侧倾":       ("pelvis_lateral_tilt",          5.0, 1.0,  "greater_than"),
     "驼背":          ("spine_posterior_bulge",      0.08, 0.02, "greater_than"),
+    "膝超伸_dist":     ("knee_distance_sagittal_both", -0.05, 0.01, "less_than"),
+    "膝超伸_dist_左":  ("knee_distance_sagittal_left",  -0.05, 0.01, "less_than"),
+    "膝超伸_dist_右":  ("knee_distance_sagittal_right", -0.05, 0.01, "less_than"),
 }
 
 
@@ -58,6 +61,16 @@ def get_angle_fn(name):
         return lambda q: angle_ops.signed_knee_angle(q, side="left")
     if name == "signed_knee_angle_right":
         return lambda q: angle_ops.signed_knee_angle(q, side="right")
+    if name == "knee_distance_sagittal_both":
+        def _both(q):
+            l = angle_ops.signed_knee_distance_sagittal(q, side="left")
+            r = angle_ops.signed_knee_distance_sagittal(q, side="right")
+            return (l + r) / 2.0
+        return _both
+    if name == "knee_distance_sagittal_left":
+        return lambda q: angle_ops.signed_knee_distance_sagittal(q, side="left")
+    if name == "knee_distance_sagittal_right":
+        return lambda q: angle_ops.signed_knee_distance_sagittal(q, side="right")
     return getattr(angle_ops, name)
 
 

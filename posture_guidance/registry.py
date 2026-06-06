@@ -263,6 +263,35 @@ register_posture(LossSpec(
     base_weight=15.0,
 ))
 
+
+# --- 膝超伸_dist（左）--- 有符号矢状面距离，无acos梯度饱和 ---
+register_posture(LossSpec(
+    name="膝超伸_dist_左",
+    angle_fn=ops.signed_knee_distance_sagittal,
+    angle_fn_kwargs={"side": "left"},
+    target_deg=-0.05,               # 约等效超伸 6°，负值=膝在后
+    direction="less_than",         # dist < target
+    tolerance_deg=0.01,             # 1cm 容许带
+    phase="always",
+    schedule="last_quarter",
+    base_weight=30.0,               # 距离量纲小，需更大 weight
+    unit="meter",                  # ★ 距离单位
+))
+
+# --- 膝超伸_dist（右）---
+register_posture(LossSpec(
+    name="膝超伸_dist_右",
+    angle_fn=ops.signed_knee_distance_sagittal,
+    angle_fn_kwargs={"side": "right"},
+    target_deg=-0.05,
+    direction="less_than",
+    tolerance_deg=0.01,
+    phase="always",
+    schedule="last_quarter",
+    base_weight=30.0,
+    unit="meter",
+))
+
 # --- 膝弯曲（左） --- 分布内，慢走常见，屈曲目标 125°
 register_posture(LossSpec(
     name="膝弯曲_左",
@@ -414,6 +443,7 @@ register_posture(LossSpec(
 # ============================================================
 
 POSTURE_ALIASES = {
+    "膝超伸_dist": ["膝超伸_dist_左", "膝超伸_dist_右"],
     "膝超伸":   ["膝超伸_左",   "膝超伸_右"],
     "膝弯曲":   ["膝弯曲_左",   "膝弯曲_右"],
     "膝弯曲_A": ["膝弯曲_A_左", "膝弯曲_A_右"],

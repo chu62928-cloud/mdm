@@ -347,3 +347,110 @@ def pelvis_lateral_tilt(q: torch.Tensor) -> torch.Tensor:
 
     tilt = torch.asin((delta_y / hip_width).clamp(-1 + EPS_L, 1 - EPS_L))
     return tilt
+
+def signed_knee_distance_sagittal(q, side="left"):
+    """
+    Signed sagittal-plane perpendicular distance from knee to hip-ankle line.
+
+    Replaces acos-based signed_knee_angle for knee hyperextension measurement.
+    The acos function has gradient saturation at 180 deg (three_point_angle cap),
+    which creates an artificial "measurement ceiling" ~182 deg that conflates
+    with the MDM prior ceiling.
+
+    This function uses a purely geometric signed distance that is:
+    - Fully differentiable with continuous gradient at dist=0 (straight knee)
+    - Physically interpretable: positive = knee in front, negative = hyperextended
+    - Target ~ -0.05m corresponds to ~5-6 deg of clinical hyperextension
+
+    Convention:
+        positive (+) = knee in front of hip-ankle line (normal)
+        negative (-) = knee behind hip-ankle line (hyperextension direction)
+
+    Args:
+        q: (..., J, 3) global joint coordinates (HumanML3D: Y=up, Z=forward)
+        side: "left" or "right"
+
+    Returns:
+        dist: (...,) signed distance in meters
+    """
+    EPS = 1e-7
+
+    hip   = q[..., get_joint_idx(f"{side}_hip"),   :]
+    knee  = q[..., get_joint_idx(f"{side}_knee"),  :]
+    ankle = q[..., get_joint_idx(f"{side}_ankle"), :]
+
+    # Hip-to-ankle direction
+    ha = ankle - hip                                           # (..., 3)
+    ha_norm = F.normalize(ha, dim=-1, eps=EPS)                # (..., 3)
+
+    # Knee offset from hip
+    hk = knee - hip                                            # (..., 3)
+
+    # Perpendicular component: remove projection along hip-ankle line
+    hk_perp = hk - (hk * ha_norm).sum(dim=-1, keepdim=True) * ha_norm  # (..., 3)
+
+    # Sagittal-plane forward direction from hip-hip lateral axis
+    l_hip = q[..., get_joint_idx("left_hip"),  :]
+    r_hip = q[..., get_joint_idx("right_hip"), :]
+    lateral = r_hip - l_hip                                   # (..., 3)
+    up = torch.zeros_like(lateral)
+    up[..., 1] = 1.0                                          # Y axis is up
+    # cross(up, lateral) points forward (verified empirically on comparison.npy)
+    facing_raw = torch.linalg.cross(up, lateral, dim=-1)      # (..., 3)
+    facing = F.normalize(facing_raw, dim=-1, eps=EPS)         # (..., 3)
+
+    # Project perpendicular component onto facing direction
+    dist = (hk_perp * facing).sum(dim=-1)                     # (...,)
+
+    return dist
+
+
+def signed_knee_angle_sagittal(q, side="left"):
+    """
+    True signed knee angle in the sagittal plane, using atan2.
+    No acos cap at 180 deg. No z-offset sigmoid heuristic.
+    Range: crosses 180 deg naturally. >180 = hyperextension.
+
+    This is the third-party arbiter for adjudicating whether
+    signed_knee_angle values >180 deg represent real hyperextension
+    or z-offset artifacts.
+
+    Args:
+        q: (..., J, 3) global joint coordinates
+        side: "left" or "right"
+    Returns:
+        angle: (...,) degrees, continuous through 180 deg
+    """
+    hip   = q[..., get_joint_idx(f"{side}_hip"),   :]
+    knee  = q[..., get_joint_idx(f"{side}_knee"),  :]
+    ankle = q[..., get_joint_idx(f"{side}_ankle"), :]
+
+    # thigh: knee->hip, shank: knee->ankle
+    thigh = hip  - knee
+    shank = ankle - knee
+
+    # Sagittal plane basis: lateral = R_hip - L_hip, up = [0,1,0]
+    l_hip = q[..., get_joint_idx("left_hip"),  :]
+    r_hip = q[..., get_joint_idx("right_hip"), :]
+    lateral = r_hip - l_hip
+    up = torch.zeros_like(lateral)
+    up[..., 1] = 1.0
+    lat_n = F.normalize(lateral, dim=-1, eps=1e-7)
+
+    # Project vectors to sagittal plane (remove lateral component)
+    def to_sagittal(v):
+        lat_comp = (v * lat_n).sum(dim=-1, keepdim=True) * lat_n
+        return v - lat_comp
+
+    t = to_sagittal(thigh)  # (..., 3)
+    s = to_sagittal(shank)  # (..., 3)
+
+    # Signed angle via atan2:
+    #   sin component = (t x s) projected onto lateral direction
+    #   cos component = t · s
+    cross_ts = torch.linalg.cross(t, s, dim=-1)       # (..., 3)
+    sin_comp = (cross_ts * lat_n).sum(dim=-1)          # (...,)
+    cos_comp = (t * s).sum(dim=-1)                     # (...,)
+
+    ang = torch.atan2(sin_comp, cos_comp)              # (-pi, pi]
+    return torch.rad2deg(ang)

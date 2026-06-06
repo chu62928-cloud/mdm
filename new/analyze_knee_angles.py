@@ -37,10 +37,14 @@ from pathlib import Path
 import numpy as np
 import torch
 import torch.nn.functional as F
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from posture_guidance.angle_ops import signed_knee_angle
 from posture_guidance.joint_indices import get_joint_idx
+from posture_guidance.phase_detector import PhaseDetector
 
 EPS = 1e-7
 
@@ -182,6 +186,12 @@ def main():
     all_right_up     = []
     all_left_signed  = []   # signed_knee_angle，直立帧（检测轻微超伸）
     all_right_signed = []
+    # ★ 新增：stance-phase 条件分布（锁死 Class 3）
+    all_left_stance  = []   # three_point_angle，stance 相帧（仅直立 + stance）
+    all_right_stance = []
+
+    # ★ 初始化 PhaseDetector
+    detector = PhaseDetector(height_thresh=0.05, vel_thresh=0.10, fps=20)
 
     skipped = 0
     total_frames  = 0
@@ -225,6 +235,22 @@ def main():
             all_left_signed.extend(left_sg.tolist())
             all_right_signed.extend(right_sg.tolist())
 
+            # ★ Stance-phase filter: 仅保留 stance 概率 > 0.5 的直立帧
+            try:
+                stance_mask = detector.get_stance_mask(q)  # (T, 2), soft [0,1]
+                # 硬阈值：stance 概率 > 0.5
+                left_stance = (stance_mask[:, 0] > 0.5).numpy()
+                right_stance = (stance_mask[:, 1] > 0.5).numpy()
+                # 与直立 mask 取交集
+                left_stance_up = left_stance & mask
+                right_stance_up = right_stance & mask
+                if left_stance_up.sum() > 0:
+                    all_left_stance.extend(left_raw[left_stance_up].tolist())
+                if right_stance_up.sum() > 0:
+                    all_right_stance.extend(right_raw[right_stance_up].tolist())
+            except Exception:
+                pass  # phase detector 可能在极端姿势失败，静默跳过
+
     print(f"\n完成。有效 clip: {len(npy_files)-skipped}/{len(npy_files)}")
     print(f"总帧数: {total_frames:,}   直立帧: {upright_frames:,} "
           f"({100*upright_frames/max(total_frames,1):.1f}%)\n")
@@ -255,6 +281,76 @@ def main():
             max_sg = float(max(sg_l.max(), sg_r.max()))
             p999_sg = float(np.percentile(np.concatenate([sg_l, sg_r]), 99.9))
             print(f"  signed 最大值: {max_sg:.1f}°   P99.9: {p999_sg:.1f}°")
+
+    # ── ★ Stance 相条件分布（锁死 Class 3）──────────────────
+    if all_left_stance or all_right_stance:
+        print("\n" + "=" * 62)
+        print("  站立相膝角分布（three_point_angle, stance-phase conditioned）")
+        print("  用于 OOD 三分类 Class 3 诊断")
+        print("=" * 62)
+
+        stance_all = np.array(all_left_stance + all_right_stance, dtype=np.float32)
+        stance_l   = np.array(all_left_stance,  dtype=np.float32) if all_left_stance else None
+        stance_r   = np.array(all_right_stance, dtype=np.float32) if all_right_stance else None
+
+        stance_p50 = float(np.percentile(stance_all, 50))
+        stance_p10 = float(np.percentile(stance_all, 10))
+        stance_p5  = float(np.percentile(stance_all, 5))
+        stance_p1  = float(np.percentile(stance_all, 1))
+        stance_p99 = float(np.percentile(stance_all, 99))
+        stance_max = float(stance_all.max())
+        stance_min = float(stance_all.min())
+
+        print(f"\n  Stance 相帧数: {len(stance_all):,}")
+        print(f"  P50={stance_p50:.1f}°  P10={stance_p10:.1f}°  P5={stance_p5:.1f}°  P1={stance_p1:.1f}°")
+        print(f"  P99={stance_p99:.1f}°  Max={stance_max:.1f}°  Min={stance_min:.1f}°")
+
+        # Class 3 check: 膝弯曲 125° 在 stance 相是否零密度
+        target_knee_flexion = 125.0
+        count_below_125 = int((stance_all < target_knee_flexion).sum())
+        pct_below_125 = 100.0 * count_below_125 / max(len(stance_all), 1)
+        count_below_130 = int((stance_all < 130).sum())
+        pct_below_130 = 100.0 * count_below_130 / max(len(stance_all), 1)
+
+        print(f"\n  膝弯曲 125° 条件 OOD 诊断：")
+        print(f"    Stance 相 < 125°:  {count_below_125:,} 帧 ({pct_below_125:.3f}%)")
+        print(f"    Stance 相 < 130°:  {count_below_130:,} 帧 ({pct_below_130:.3f}%)")
+
+        if pct_below_125 < 0.1:
+            print(f"  [Class 3] 条件 OOD 坐实：stance 相膝角 <125° 的帧占比 <0.1%")
+            print(f"    → Stance 相膝角集中在 {stance_p10:.0f}-{stance_p99:.0f}°")
+            print(f"    → 膝弯曲 125°+stance 是 (角度, 相位) 联合零密度")
+            print(f"    → Guidance 将失败（相位约束与角度约束冲突）")
+        elif pct_below_125 < 1.0:
+            print(f"  [Class 3] 条件 OOD 高度可疑：stance 相膝角 <125° 的帧占比仅 {pct_below_125:.2f}%")
+        elif pct_below_125 < 5.0:
+            print(f"  [Class 2] 密度尾部但极稀疏：stance 相 <125° 的帧 {pct_below_125:.2f}%")
+        else:
+            print(f"  [Class 0/2] 有条件密度：stance 相 <125° 的帧 {pct_below_125:.1f}%")
+
+        # Stance-conditioned histogram
+        fig, ax = plt.subplots(figsize=(10, 6))
+        bins = 60
+        ax.hist(stance_all, bins=bins, density=True, alpha=0.7, color='darkred',
+                edgecolor='white', linewidth=0.5)
+        ax.axvline(target_knee_flexion, color='orange', linestyle='--', linewidth=2,
+                   label=f'Knee flexion target {target_knee_flexion}°')
+        ax.axvline(stance_p50, color='green', linestyle=':', linewidth=1.5,
+                   label=f'Stance P50={stance_p50:.0f}°')
+        ax.axvline(stance_p10, color='blue', linestyle=':', linewidth=1.5,
+                   label=f'Stance P10={stance_p10:.0f}°')
+        ax.axvline(stance_p1, color='purple', linestyle=':', linewidth=1.5,
+                   label=f'Stance P1={stance_p1:.0f}°')
+        ax.set_xlabel('Knee Angle (three-point, degrees)')
+        ax.set_ylabel('Density')
+        ax.set_title('Stance-Phase Knee Angle Distribution (three_point_angle)')
+        ax.legend(fontsize=8)
+        fig.tight_layout()
+
+        out_dir = Path("new_results")
+        out_dir.mkdir(parents=True, exist_ok=True)
+        fig.savefig(out_dir / "knee_angle_stance_distribution.png", dpi=150)
+        print(f"\n  Stance 相膝角直方图已保存: new_results/knee_angle_stance_distribution.png")
 
     # ── 路线 A 判断 ─────────────────────────────────────────
     print("\n" + "=" * 62)

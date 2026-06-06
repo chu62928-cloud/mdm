@@ -671,6 +671,16 @@ class GaussianDiffusion:
             yield out
             img = out["sample"]
 
+        # ======== Save conflict log at end of sampling ========
+        if os.environ.get("LOG_PRIOR_CONFLICT", "0") == "1" and hasattr(guidance, "_conflict_log") and guidance._conflict_log:
+            import json as _json
+            log_path = os.environ.get("CONFLICT_LOG_PATH", "/tmp/prior_conflict_log.json")
+            os.makedirs(os.path.dirname(log_path) if os.path.dirname(log_path) else ".", exist_ok=True)
+            with open(log_path, "w") as _f:
+                _json.dump(guidance._conflict_log, _f)
+            print(f"[LOG_PRIOR_CONFLICT] saved {len(guidance._conflict_log)} records to {log_path}")
+        # =======================================================
+
     # ============================================================
     # Variant dispatch — internal helper
     # ============================================================
@@ -1421,6 +1431,46 @@ class GaussianDiffusion:
 
         grad = grad.detach()
         x0_hat = x0_hat.detach()
+
+        # ======== LOG_PRIOR_CONFLICT hook ========
+        if os.environ.get("LOG_PRIOR_CONFLICT", "0") == "1":
+            with th.no_grad():
+                eps_for_log = self._predict_eps_from_xstart(x_t, t_tensor, x0_hat)
+                grad_flat = grad.flatten(1)
+                eps_flat = eps_for_log.flatten(1)
+                cos_global = torch.nn.functional.cosine_similarity(grad_flat, eps_flat, dim=1)
+                grad_j66 = grad_flat[:, :66]
+                eps_j66 = eps_flat[:, :66]
+                cos_j_all = torch.nn.functional.cosine_similarity(grad_j66, eps_j66, dim=1)
+                JM = {"骨盆前倾":[0],"骨盆前倾_深蹲":[0],"躯干前倾":[0,3,6,9,12,16,17],"膝超伸_左":[4],"膝超伸_右":[5],"膝弯曲_左":[4],"膝弯曲_右":[5],"膝弯曲_A_左":[4],"膝弯曲_A_右":[5],"膝弯曲_B_左":[4],"膝弯曲_B_右":[5]}
+                jds = []
+                for j in JM.get(spec0.name, list(range(22))):
+                    jds.extend([j*3, j*3+1, j*3+2])
+                if jds:
+                    cos_joint = torch.nn.functional.cosine_similarity(grad_flat[:, jds], eps_flat[:, jds], dim=1)
+                else:
+                    cos_joint = cos_j_all
+                gn = grad_flat.norm(dim=1)
+                en = eps_flat.norm(dim=1)
+                nr = gn / (en + 1e-8)
+                hn = torch.isnan(grad).any().item()
+                gnr = grad.nan_to_num(0).norm().item()
+                if not hasattr(guidance, "_conflict_log"):
+                    guidance._conflict_log = []
+                B = grad.shape[0]
+                for b in range(B):
+                    guidance._conflict_log.append({
+                        "t":t_int,"T":T,
+                        "cos_global":cos_global[b].item(),
+                        "cos_joint":cos_joint[b].item() if cos_joint.numel()>1 else cos_joint.item(),
+                        "grad_norm":gn[b].item(),
+                        "eps_norm":en[b].item(),
+                        "norm_ratio":nr[b].item(),
+                        "loss":loss.item() if hasattr(loss,"item") else float(loss),
+                        "has_nan":hn,
+                        "grad_norm_raw":gnr,
+                    })
+        # ==================================================
 
         # ---- 4. PID controller → s_t ----
         # err 形状要和 grad 的 batch 维匹配

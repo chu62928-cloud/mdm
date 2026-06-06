@@ -1,0 +1,106 @@
+# HumanML3D 高膝角 clip 文本候选（top-50 clips）
+# min_angle=174.0°, split=train
+# 按频率降序，共 102 条
+
+the person is  stretching.
+a person what it seems to perform yoga or a ballet dance moves
+a person stretches by holding their hands out and moving their upper body about.
+a person twists his body, stretches side to side and bends backwards.
+moving arms side to side above head and then whole body.
+the person takes a step forward, while their arms are raised outward and at the height of their shoulders, and then quickly pulses their arms.
+a person takes a few steps forward with their arms outstretched.
+this person holds both arms out to the sides and walks forward.
+a person shrugs their shoulders and swings their arms.
+someone is swinging their arms around their body back and fourth and then stops.
+a person raises both arms in front of himself, then drops them into a casual swing.
+person skipping jauntily forward in a slightly diagonal path.
+the person is skipping across the room.
+a person bounces while walking forward.
+person is acting like a human dragon.
+a person stands and flaps arms up and down while walking side to side, they end with their arms down to their side.
+a person waving their arms up and down while stepping side to side.
+a person stretches by putting one hand on their hip and stretching the opposite arm over their head, and then switches to the other side.
+this person uses both hands as is to open something.
+a person is mixing something and then takes a drink.
+a person is standing and leaning forward and using hands to swat away some objects in front of them.
+the person is swinging their arms like a gorilla.
+the man is pretending to be gorrila
+a person raises their hands toward their body repeatedly.
+a person that lifts both of their hands up twice
+someone is lifting weights with both hands their arms are in front of them and it is bending at the elbow in a curling motion.
+a person hunches over, holds arms out wide and swings them side to side before scratching self under the arm
+a person is standing facing forward and sways a little while moving their hands as if they were talking.
+no idea i am sorry
+person flexing arms and moving them inwards twords chest.
+a person puts their arms above their head and stretches
+a person is putting both arms up.
+a man is stretching his arms upwards
+the person did a front kick a sidekick and a back kick.
+the person is acrobatically raising their leg up high
+a man behaves like a chicken.
+a man bends his neck and continues to bend his back, and stays in this position with only slight movements in the neck.
+a person bows very slightly.
+a person is pretending to be an elephant
+an elephant lifts its trunk high in the sky
+a person is standing with hands togething and bending over stretching.
+a standing person has their hamds together in front of their chest and twists at their waist, bends down from their waist before raising again and twisting again.
+a person exercising with hip rotations and bending
+a person is facing forward without moving.
+the person is standing still.
+a person reaches into both directions before going into a superman pose.
+a man is raising one arm at a time before he places his hands on his hips
+raising arm up and then the other arm.
+a person leans over to touch the ground with left hand and right arm raised.
+person reaches down to touch the left side of foot
+a person leans over to touch the ground with right hand and left arm raised.
+person reaches down to touch the right side of foot
+a person drinks from a bottle in their right hand
+a person opens a bottle with their left hands and drinks it with their right.
+the person is drinking out of his bottle with his right hand.
+a person drinks from a bottle in their left hand
+a person opens a bottle with their right hands and drinks it with their left.
+the person is drinking out of his bottle with his left hand.
+person leans forward side to side and kicks extends right leg three times to side quite high and balances on left leg
+the person is kicking with his right leg while holding something with his right.
+person leans forward side to side and kicks extends left leg three times to side quite high and balances on right leg
+the person is kicking with his left leg while holding something with his left.
+a man holds his hands together and kicks with his right leg repeatedly.
+a person kicks backwards, then swings around their right leg.
+a person kicking right leg back, sideward and circular direction.
+a man holds his hands together and kicks with his left leg repeatedly.
+a person kicks backwards, then swings around their left leg.
+a person kicking left leg back, sideward and circular direction.
+a person bend the body, in righ and left direction
+the person lunges from side to side. they lift their right arm up and stretch while leaning to the left. they lift their left arm up and stretch while leaning to the right.
+a person bend the body, in righ and right direction
+the person lunges from side to side. they lift their left arm up and stretch while leaning to the right. they lift their right arm up and stretch while leaning to the left.
+the person is drinking from a bottle with his left hand.
+the person is drinking from a bottle with his right hand.
+a person relaxes and swings their torso, swinging their right arm around.
+a person stands in a fixed spot, swings their shoulders forward and backward, then swings their right arm in a throwing forward motion.
+a person shifts their body from left to right before throwing forward with their right hand.
+a person relaxes and swings their torso, swinging their left arm around.
+a person stands in a fixed spot, swings their shoulders forward and backward, then swings their left arm in a throwing forward motion.
+a person shifts their body from right to left before throwing forward with their left hand.
+a person moves both of his hand left and right bended as well imitating movements of an animal
+a person swift the hands in right and left direction
+a person moves both of his hand right and left bended as well imitating movements of an animal
+a person swift the hands in left and right direction
+a man kicks with his left leg- first up, then to the left, then backwards.
+a man kicks with his right leg- first up, then to the right, then backwards.
+a person raises their left arm in front of their face like an elephant.
+a person raises their right arm in front of their face like an elephant.
+a person stands and slowly looks from the right to the left.
+this person stands still and moves his head from right to left.
+a person standing motionless looks down at the ground, then looks right, then looks lefta person standing motionless looks down at the ground, then looks right, then looks left
+a person stands and slowly looks from the left to the right.
+this person stands still and moves his head from left to right.
+a person standing motionless looks down at the ground, then looks left, then looks righta person standing motionless looks down at the ground, then looks left, then looks right
+a person twitches their left hand.
+a person twitches their right hand.
+a person is bending forward with their arms down, then they stand up and rotate right and put down a large object.
+person pick something up and sat it to the right.
+a man is doubled over, leaning down from the hips, as if lifting a box, before slowly yet gingerly lifting the imaginary box and placing it to the left side of the screen.
+a person is bending forward with their arms down, then they stand up and rotate left and put down a large object.
+person pick something up and sat it to the left.
+a man is doubled over, leaning down from the hips, as if lifting a box, before slowly yet gingerly lifting the imaginary box and placing it to the right side of the screen.

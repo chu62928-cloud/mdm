@@ -259,6 +259,15 @@ def main(args=None):
             'lr':          getattr(args, 'posture_lr', 0.05),
         }
 
+    # Save conflict log if LOG_PRIOR_CONFLICT was enabled
+    if guidance is not None and hasattr(guidance, '_conflict_log') and guidance._conflict_log:
+        import json as _json
+        save_dict['prior_conflict_log'] = guidance._conflict_log
+        conflict_path = npy_path.replace('.npy', '_conflict.json')
+        with open(conflict_path, 'w') as _f:
+            _json.dump(guidance._conflict_log, _f)
+        print(f'[LOG_PRIOR_CONFLICT] saved {len(guidance._conflict_log)} records to {conflict_path}')
+
     np.save(npy_path, save_dict)
 
     if args.dynamic_text_path != '':

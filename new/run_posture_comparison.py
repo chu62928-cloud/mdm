@@ -322,6 +322,15 @@ def main():
         },
     }
 
+    # Save conflict log if LOG_PRIOR_CONFLICT was enabled
+    if hasattr(posture_guidance, '_conflict_log') and posture_guidance._conflict_log:
+        import json as _json
+        save_dict['prior_conflict_log'] = posture_guidance._conflict_log
+        conflict_path = os.path.join(out_dir, 'prior_conflict_log.json')
+        with open(conflict_path, 'w') as _f:
+            _json.dump(posture_guidance._conflict_log, _f)
+        print(f'[LOG_PRIOR_CONFLICT] saved {len(posture_guidance._conflict_log)} records to {conflict_path}')
+
     out_path = os.path.join(out_dir, args.comparison_output)
     np.save(out_path, save_dict, allow_pickle=True)
 
