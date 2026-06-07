@@ -45,7 +45,8 @@ class CombinedGuidance:
     """
 
     def __init__(self, posture=None, muscle=None, fk_fn=None,
-                 mode: str = "joint", w_joint: float = 1.0, w_muscle: float = 1.0):
+                 mode: str = "joint", w_joint: float = 1.0, w_muscle: float = 1.0,
+                 muscle_loss_kind: str = "guidance", muscle_margin: float = 0.3):
         mode = (mode or "joint").lower()
         if mode not in ("joint", "muscle", "both"):
             raise ValueError(f"mode must be joint|muscle|both, got {mode!r}")
@@ -55,6 +56,12 @@ class CombinedGuidance:
         self.mode = mode
         self.w_joint = float(w_joint)
         self.w_muscle = float(w_muscle)
+        # "guidance" = dense 目标匹配（处处可微、最小化即朝病态）；"clinical" = 原检测损失（>0=病态）
+        self.muscle_loss_kind = muscle_loss_kind
+        self.muscle_margin = float(muscle_margin)
+        # 诊断用：记录上一次各分量的标量值（detached）
+        self.last_joint = 0.0
+        self.last_muscle = 0.0
 
     # -- 各项是否启用 ------------------------------------------------------
     @property
@@ -103,11 +110,21 @@ class CombinedGuidance:
                 spec_schedule_override=spec_schedule_override,
             )
             total = total + self.w_joint * L_joint
+            self.last_joint = float(L_joint.detach())
 
         if self.muscle_active:
             x_btc = motion_mdm_to_btc(motion)
-            # MuscleGuidance.loss：>0 = 越病态，要"最大化"，所以在最小化框架里取负号
-            L_muscle = self.muscle.loss(x_btc)
-            total = total - self.w_muscle * L_muscle
+            if self.muscle_loss_kind == "clinical":
+                # 原检测损失：>0=病态，最小化框架里取负号（梯度上升）。注意它在引导起点
+                # 梯度恒为 0（死区），不建议用于生成，仅为兼容保留。
+                L_muscle = self.muscle.loss(x_btc)
+                total = total - self.w_muscle * L_muscle
+            else:
+                # dense 目标匹配损失：处处可微、起点梯度非零，**最小化即朝病态** → 直接相加
+                from muscle_guidance_mdm import muscle_guidance_loss
+                L_muscle = muscle_guidance_loss(
+                    self.muscle, x_btc, kind="guidance", margin=self.muscle_margin)
+                total = total + self.w_muscle * L_muscle
+            self.last_muscle = float(L_muscle.detach())
 
         return total

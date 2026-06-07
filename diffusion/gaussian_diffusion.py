@@ -768,6 +768,8 @@ class GaussianDiffusion:
 
         # 组合引导：把关节 + 肌肉两路合成一个可微 motion_loss（v2_dps / v6 用）
         from posture_guidance.combined_loss import CombinedGuidance
+        muscle_loss_kind = os.environ.get("MUSCLE_LOSS_KIND", "guidance")
+        muscle_margin = float(os.environ.get("MUSCLE_MARGIN", "0.3"))
         combined = CombinedGuidance(
             posture=guidance,
             muscle=muscle_guidance,
@@ -775,6 +777,8 @@ class GaussianDiffusion:
             mode=muscle_mode,
             w_joint=joint_weight,
             w_muscle=muscle_weight,
+            muscle_loss_kind=muscle_loss_kind,
+            muscle_margin=muscle_margin,
         )
 
         if variant_name == "v1_mu_sgd":
@@ -1053,9 +1057,12 @@ class GaussianDiffusion:
         loss_val  = loss.item()
         delta_mu  = (s_eff * grad).norm().item()
         grad_norm = grad.norm().item()
+        comp = ""
+        if combined is not None and combined.muscle_active:
+            comp = f"  [joint={combined.last_joint:.4f} muscle={combined.last_muscle:.4f}]"
         print(f"[V2 UPDATE t={t_int:3d}] loss={loss_val:.4f}  "
               f"grad_norm={grad_norm:.5f}  |s*grad|={delta_mu:.4f}  s_eff={s_eff:.2f}  "
-              f"loss_form={loss_form}  sigma_sched={sigma_schedule}  mproj={manifold_project}")
+              f"loss_form={loss_form}  sigma_sched={sigma_schedule}  mproj={manifold_project}{comp}")
 
         mu_t_new = mu_t.detach() - s_eff * grad
         return mu_t_new
@@ -1605,13 +1612,16 @@ class GaussianDiffusion:
 
         if verbose:
             mode = "norm" if normalize_grad else "raw"
+            comp = ""
+            if combined is not None and combined.muscle_active:
+                comp = f" [joint={combined.last_joint:.4f} muscle={combined.last_muscle:.4f}]"
             print(
                 f"[V6 t={t_int:3d}] err={err.mean().item():+.4f}rad "
                 f"sigma={sigma_t:.4f} s_t={s_t.mean().item():.3f} "
                 f"loss={loss.item():.4f} grad_norm={gn.mean().item():.5f} "
                 f"|Δμ|={delta.norm().item():.4f} ({mode}"
                 f"{', proj' if manifold_project else ''}"
-                f"{', clip' if delta_max is not None else ''})"
+                f"{', clip' if delta_max is not None else ''}){comp}"
             )
 
         # ---- Route C: score suppression at low-noise steps ----

@@ -34,6 +34,7 @@ from posture_loss import (build_reference_from_activations,             # noqa: 
                           make_synthetic_distortion, compute_posture_loss)
 from posture_loss_torch import build_group_index, compute_posture_loss_torch  # noqa: E402
 from muscle_guidance import MuscleGuidance                              # noqa: E402
+from muscle_guidance_mdm.dense_loss import dense_posture_guidance_loss  # noqa: E402
 from posture_guidance.combined_loss import CombinedGuidance             # noqa: E402
 from posture_guidance.controller import PostureGuidance                 # noqa: E402
 
@@ -108,6 +109,20 @@ def main():
     np_total = compute_posture_loss(distorted, mint_cols, POSTURE, ref)["total"]
     parity = abs(np_total - float(L_bad))
     ok &= check(f"numpy/torch parity (diff={parity:.2e})", parity < 1e-4)
+
+    # ---- 1b. dense 引导损失：起点梯度非零（修复 loss=0 死区的核心断言）----
+    print("\n-- 1b. dense 引导损失起点梯度 --")
+    x_ref = torch.tensor(normal, requires_grad=True)
+    L_clin = compute_posture_loss_torch(x_ref, gidx, POSTURE, ref)
+    g_clin = torch.autograd.grad(L_clin, x_ref, retain_graph=False, allow_unused=True)[0]
+    gnorm_clin = 0.0 if g_clin is None else float(g_clin.norm())
+    x_ref2 = torch.tensor(normal, requires_grad=True)
+    L_dense = dense_posture_guidance_loss(x_ref2, gidx, POSTURE, ref)
+    L_dense.backward()
+    gnorm_dense = float(x_ref2.grad.norm())
+    print(f"   clinical 起点 |grad|={gnorm_clin:.6f}   dense 起点 |grad|={gnorm_dense:.6f}")
+    ok &= check("clinical 起点梯度=0（确认死区）", gnorm_clin < 1e-9)
+    ok &= check("dense 起点梯度>0（修复生效）", gnorm_dense > 1e-3)
 
     # ---- 2. MuscleGuidance（DummyProxy）----
     # 让 reference 与 query 处于不同激活水平（低 vs 高），逼四分量 loss 越过阈值触发，
