@@ -86,11 +86,6 @@ def run_single_pass(
     posture_lbfgs_steps,
     posture_lr,
     seed,
-    # --- muscle guidance args ---
-    muscle_guidance=None,
-    guidance_mode="joint",
-    joint_weight=1.0,
-    muscle_weight=1.0,
 ):
     """
     跑一次完整的采样，返回 hml + xyz 两种格式。
@@ -121,11 +116,6 @@ def run_single_pass(
         posture_lbfgs_steps=posture_lbfgs_steps,
         posture_lr=posture_lr,
         posture_fk_fn=fk_fn,
-        # --- muscle guidance ---
-        muscle_guidance=muscle_guidance,
-        guidance_mode=guidance_mode,
-        joint_weight=joint_weight,
-        muscle_weight=muscle_weight,
     )
     # sample_hml: (B, 263, 1, T)
 
@@ -156,15 +146,6 @@ def parse_extra_args():
     parser.add_argument("--posture_lr", type=float, default=0.05)
     parser.add_argument("--comparison_output", type=str, default="comparison.npy",
                         help="对照实验结果保存文件名（在 output_dir 下）")
-    parser.add_argument("--guidance_mode", type=str, default="joint",
-                        choices=["joint", "muscle", "both"])
-    parser.add_argument("--muscle_ckpt", type=str, default="")
-    parser.add_argument("--muscle_posture", type=str, default="anterior_pelvic_tilt")
-    parser.add_argument("--muscle_assets_dir", type=str, default="motion2muscle")
-    parser.add_argument("--joint_weight", type=float, default=1.0)
-    parser.add_argument("--muscle_weight", type=float, default=1.0)
-    parser.add_argument("--proxy_mean_path", type=str, default=None)
-    parser.add_argument("--proxy_std_path", type=str, default=None)
     args, unknown = parser.parse_known_args()
     sys.argv = [sys.argv[0]] + unknown
     return args
@@ -183,14 +164,6 @@ def main():
     args.posture_lbfgs_steps  = extra_args.posture_lbfgs_steps
     args.posture_lr           = extra_args.posture_lr
     args.comparison_output    = extra_args.comparison_output
-    args.guidance_mode        = extra_args.guidance_mode
-    args.muscle_ckpt          = extra_args.muscle_ckpt
-    args.muscle_posture       = extra_args.muscle_posture
-    args.muscle_assets_dir    = extra_args.muscle_assets_dir
-    args.joint_weight         = extra_args.joint_weight
-    args.muscle_weight        = extra_args.muscle_weight
-    args.proxy_mean_path      = extra_args.proxy_mean_path
-    args.proxy_std_path       = extra_args.proxy_std_path
 
     if not args.posture_instructions:
         print("[Warning] 没有传入 --posture_instructions，"
@@ -274,40 +247,12 @@ def main():
         n_joints=n_joints,
     )
 
-    # ----- Muscle guidance setup -----
-    guidance_mode = getattr(args, "guidance_mode", "joint").lower()
-    want_joint = len(args.posture_instructions) > 0 and guidance_mode in ("joint", "both")
-    want_muscle = guidance_mode in ("muscle", "both")
-    print(f"[Config] mode={guidance_mode} joint={want_joint} muscle={want_muscle}")
-
-    posture_guidance = None
-    if want_joint and len(args.posture_instructions) > 0:
-        posture_guidance = PostureGuidance(instructions=args.posture_instructions)
-        posture_guidance.set_variant(
-            variant=GUIDANCE_VARIANT,
-            variant_kwargs=GUIDANCE_KWARGS,
-            diagnostic=DIAGNOSTIC,
-        )
-
-    muscle_guidance = None
-    if want_muscle and hasattr(args, "muscle_ckpt") and args.muscle_ckpt:
-        from muscle_guidance_mdm import build_muscle_guidance
-        t2m = data.dataset.t2m_dataset
-        mdm_mean = torch.tensor(t2m.mean, dtype=torch.float32)
-        mdm_std  = torch.tensor(t2m.std,  dtype=torch.float32)
-        muscle_guidance = build_muscle_guidance(
-            ckpt_path=args.muscle_ckpt,
-            posture_name=args.muscle_posture,
-            assets_dir=args.muscle_assets_dir,
-            mdm_mean=mdm_mean, mdm_std=mdm_std,
-            proxy_mean_path=args.proxy_mean_path,
-            proxy_std_path=args.proxy_std_path,
-            same_normalization=True,
-            device=dist_util.dev(),
-        )
-        print("[Muscle] guidance instance built")
-    elif want_muscle:
-        print("[WARN] muscle mode requested but no muscle_ckpt provided, skipping muscle guidance")
+    posture_guidance = PostureGuidance(instructions=args.posture_instructions)
+    posture_guidance.set_variant(
+        variant=GUIDANCE_VARIANT,
+        variant_kwargs=GUIDANCE_KWARGS,
+        diagnostic=DIAGNOSTIC,
+    )
 
 
     # =========================================================
@@ -330,15 +275,6 @@ def main():
         seed=args.seed,
     )
 
-    # ===== Muscle reference: build from baseline output =====
-    if want_muscle and muscle_guidance is not None:
-        print("\n" + "=" * 70)
-        print("Muscle: building reference from baseline sample ...")
-        print("=" * 70)
-        x0_ref_btc = torch.from_numpy(baseline_out["hml_tj"]).float().to(dist_util.dev())
-        muscle_guidance.build_reference(x0_ref_btc)
-        print("[Muscle] reference built and frozen.")
-
     # =========================================================
     # Pass 2: guided（带约束）
     # =========================================================
@@ -357,11 +293,6 @@ def main():
         posture_lbfgs_steps=args.posture_lbfgs_steps,
         posture_lr=args.posture_lr,
         seed=args.seed,
-        # --- muscle guidance ---
-        muscle_guidance=muscle_guidance,
-        guidance_mode=guidance_mode,
-        joint_weight=args.joint_weight,
-        muscle_weight=args.muscle_weight,
     )
 
     # =========================================================
@@ -383,14 +314,11 @@ def main():
         "num_samples":          args.num_samples,
         "motion_length":        args.motion_length,
         "fps":                  fps,
-        "guidance_mode":        guidance_mode,
         "guidance_config": {
             "lbfgs_steps": args.posture_lbfgs_steps,
             "lr":          args.posture_lr,
             "variant": GUIDANCE_VARIANT,
             "variant_kwargs": GUIDANCE_KWARGS,
-            "joint_weight": args.joint_weight,
-            "muscle_weight": args.muscle_weight,
         },
     }
 

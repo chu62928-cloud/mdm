@@ -23,7 +23,7 @@ OUT_ROOT="${OUT_ROOT:-./output/apt_integrated}"
 
 # 统一 variant：v2_dps，APT 最佳超参
 export GUIDANCE_VARIANT="${GUIDANCE_VARIANT:-v2_dps}"
-export GUIDANCE_KWARGS_JSON="${GUIDANCE_KWARGS_JSON:-{\"s\":40,\"schedule\":\"last_quarter\",\"base_weight\":20}}"
+export GUIDANCE_KWARGS_JSON='{"s":40,"schedule":"last_quarter"}'
 export GUIDANCE_DIAGNOSTIC="${GUIDANCE_DIAGNOSTIC:-1}"
 
 run_one () {
