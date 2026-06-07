@@ -354,6 +354,48 @@ ska>180° 的帧中 **98.4% 在 sag 下也 >180°** → ska 的 192° 被独立�
 
 ---
 
+## 十三、关节角 + 肌肉激活组合引导（整合，2026-06）
+
+把"关节角约束（Module 1，本仓库）"与"肌肉激活约束（Module 2，`motion2muscle/`
+的冻结代理 + 四分量 posture loss）"合并进**同一条 MDM 采样循环**，保持接口不变，
+支持 **joint / muscle / both** 三种模式。
+
+### 13.1 设计
+- **统一组合 loss**（`posture_guidance/combined_loss.py` 的 `CombinedGuidance`）：
+  `total = w_joint · L_joint − w_muscle · L_muscle`
+  关节项 hinge/huber（到位即 0，最小化）；肌肉项 `MuscleGuidance.loss`（>0=越病态，
+  取负号 → 等价梯度上升）。三模式由 `mode` 切换。
+- **注入点**：统一走 **v2_dps**（README 实测 APT 最佳：`s=40 + last_quarter`），并保留
+  **v6**。两个 variant 内部把关节 loss 换成 `combined.motion_loss(x0_hat, …)`，肌肉项的
+  梯度天然穿过冻结代理（且在 v2/v6 里穿过 MDM）回到 `x_t`。其余 variant 行为不变。
+- **两阶段采样**（肌肉 reference，HANDOFF §4.2）：muscle/both 模式下先无引导采样一次
+  得正常样本 → `build_reference` 冻结 → 再带组合引导采样。`sample/generate.py` 编排。
+- **归一化握手**：默认 `same_normalization=True`（代理与 MDM 同一套 HumanML3D Mean/Std）；
+  否则用 `--proxy_mean_path/--proxy_std_path` 显式换算（见 HANDOFF §6.1）。
+
+### 13.2 配置（env 优先，CLI 兜底）
+```bash
+GUIDANCE_MODE=both        # joint | muscle | both
+JOINT_WEIGHT=1.0  MUSCLE_WEIGHT=1.0
+GUIDANCE_VARIANT=v2_dps
+GUIDANCE_KWARGS_JSON='{"s":40,"schedule":"last_quarter","base_weight":20}'
+```
+CLI：`--guidance_mode --joint_weight --muscle_weight --posture_instructions
+--muscle_ckpt --muscle_posture --muscle_assets_dir --muscle_same_norm/--muscle_diff_norm`。
+
+### 13.3 跑 APT 三模式对照
+```bash
+MODEL_PATH=<MDM_ckpt.pt> MUSCLE_CKPT=<net_best_loss.pth> bash new/run_apt_integrated.sh
+```
+纯链路自检（不需要权重/ckpt）：`python new/sanity_muscle_integration.py`（已验证全过）。
+
+### 13.4 运行前置（由肌肉队补齐到 `motion2muscle/`）
+1. 代理**模型类**定义（transformer，来自 motion2muscle-main）；2. `net_best_*.pth` 权重；
+3. 代理 `Mean/Std`（或确认与 MDM 同一套 → `same_normalization=True`）。
+缺 1/2 时 **joint 模式照常可跑**；`sanity_muscle_integration.py` 的纯 loss 自检也不需要权重。
+
+---
+
 ## 总结一句话（更新）
 
 两个分布内体态成功（骨盆前倾 N=15: hit=88.7%/corr=0.407；躯干前倾 N=15: hit=88.9%/corr=0.295）；三轮消融揭示 corr↔hit 由推力幅度 Δ 决定，V6 真实优势是相同 Δ 下 hit 效率 2.1×。**膝超伸的结论经本轮修正**：用无奇点的距离度量 + 步态保持的 last_quarter，guidance **能生成真超伸**（渲染确认 190°，比直膝超 10°），推翻了"完全做不到"的旧判断；但它停在边界外一小段，**最可能是"边界外推撞硬墙"而非"零密度造密度"**（A/B 待多 target 曲线裁定）。同时本轮暴露：旧的 acos 三点角（tpa）在 >180° 完全失明（比真几何角低 60°+），这是独立于 guidance 真伪的方法学贡献；而新的 sag 度量在深屈膝区会绕回误报，故膝超伸**维持 Class 1**、Class 改分提议撤回。**给接续者最重要的一句**：膝超伸的真伪只能靠 sag+tpa+渲染三者交叉验证；在 Phase D 多 target 曲线出来之前，不要写"突破零密度"——你自己膝 190° 撞 182° 墙的旧证据强烈指向"有硬上限"。

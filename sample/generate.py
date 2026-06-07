@@ -145,25 +145,58 @@ def main(args=None):
         else:
             raise NotImplementedError('DiP model only supports BERT text encoder at the moment. If you implement this, please send a PR!')
 
-    # ★ 改动2：初始化 posture guidance（在采样循环外，只执行一次）
+    # ★ 改动2：初始化组合引导（关节 + 肌肉）（在采样循环外，只执行一次）
     guidance = None
     fk_fn    = None
+    muscle_guidance = None
 
-    posture_instructions = getattr(args, 'posture_instructions', None)
-    if posture_instructions is not None and len(posture_instructions) > 0:
-        guidance = PostureGuidance(
-            instructions=posture_instructions,
-            verbose=True,
-        )
-        # make_fk_fn 绑定 t2m_dataset 的 mean/std，返回可微的 FK 闭包
-        # 只调用一次，整个 num_repetitions 循环复用同一个 fk_fn
-        fk_fn = make_fk_fn(
-            t2m_dataset=data.dataset.t2m_dataset,
-            n_joints=n_joints,
-        )
-        print(f"[Posture Guidance] active: {posture_instructions}")
+    posture_instructions = getattr(args, 'posture_instructions', None) or []
+    guidance_mode = (os.environ.get("GUIDANCE_MODE", None)
+                     or getattr(args, 'guidance_mode', None) or "joint").lower()
+    joint_weight = float(os.environ.get("JOINT_WEIGHT", getattr(args, 'joint_weight', 1.0)))
+    muscle_weight = float(os.environ.get("MUSCLE_WEIGHT", getattr(args, 'muscle_weight', 1.0)))
+
+    want_joint = len(posture_instructions) > 0 and guidance_mode in ("joint", "both")
+    want_muscle = guidance_mode in ("muscle", "both")
+    any_guidance = want_joint or want_muscle
+
+    if any_guidance:
+        # make_fk_fn 绑定 t2m_dataset 的 mean/std，返回可微的 FK 闭包（关节 + 肌肉两路复用）
+        fk_fn = make_fk_fn(t2m_dataset=data.dataset.t2m_dataset, n_joints=n_joints)
+        if len(posture_instructions) > 0:
+            guidance = PostureGuidance(instructions=posture_instructions, verbose=True)
+        print(f"[Guidance] mode={guidance_mode} joint={posture_instructions} "
+              f"w_joint={joint_weight} w_muscle={muscle_weight}")
     else:
-        print("[Posture Guidance] disabled (no instructions provided)")
+        print("[Guidance] disabled (mode=joint with no instructions)")
+
+    # ---- 肌肉/组合引导：构建 MuscleGuidance + 阶段一参考（HANDOFF §4.2）----
+    if want_muscle:
+        from muscle_guidance_mdm import build_muscle_guidance
+        t2m = data.dataset.t2m_dataset
+        same_norm = bool(getattr(args, 'muscle_same_norm', True))
+        mdm_mean = torch.tensor(t2m.mean, dtype=torch.float32)
+        mdm_std  = torch.tensor(t2m.std,  dtype=torch.float32)
+        muscle_guidance = build_muscle_guidance(
+            ckpt_path=getattr(args, 'muscle_ckpt', '') or '',
+            posture_name=getattr(args, 'muscle_posture', 'anterior_pelvic_tilt'),
+            assets_dir=getattr(args, 'muscle_assets_dir', 'motion2muscle'),
+            mdm_mean=mdm_mean, mdm_std=mdm_std,
+            proxy_mean_path=getattr(args, 'proxy_mean_path', None),
+            proxy_std_path=getattr(args, 'proxy_std_path', None),
+            same_normalization=same_norm,
+            device=dist_util.dev(),
+        )
+        # 阶段一：无引导采样一次，构建并冻结 reference（之后是常量，不带梯度）
+        print("[Muscle] phase-1: building reference from an UNGUIDED sample ...")
+        x0_ref = sample_fn(
+            model, motion_shape, clip_denoised=False, model_kwargs=model_kwargs,
+            skip_timesteps=0, init_image=init_image, progress=True, dump_steps=None,
+            noise=None, const_noise=False,
+        )  # (B,263,1,T) MDM-normalized
+        x0_ref_btc = x0_ref.detach().permute(0, 3, 2, 1).squeeze(2)  # (B,T,263)
+        muscle_guidance.build_reference(x0_ref_btc)
+        print("[Muscle] phase-1 reference built & frozen.")
 
     for rep_i in range(args.num_repetitions):
         print(f'### Sampling [repetitions #{rep_i}]')
@@ -187,6 +220,11 @@ def main(args=None):
             posture_lbfgs_steps=getattr(args, 'posture_lbfgs_steps', 5),
             posture_lr=getattr(args, 'posture_lr', 0.05),
             posture_fk_fn=fk_fn,
+            # ---- 肌肉/组合引导参数 ----
+            muscle_guidance=muscle_guidance,
+            guidance_mode=guidance_mode,
+            joint_weight=joint_weight,
+            muscle_weight=muscle_weight,
         )
 
         # 保存 MDM 原始输出（在 hml_vec -> xyz 后处理之前）

@@ -230,6 +230,35 @@ def add_generate_options(parser):
     group.add_argument("--action_name", default='', type=str,
                        help="An action name to be generated. If empty, will take text prompts from dataset.")
     group.add_argument("--target_joint_names", default='DIMP_FINAL', type=str, help="Force single joint configuration by specifing the joints (coma separated). If None - will use the random mode for all end effectors.")
+    add_posture_guidance_options(parser)
+
+
+def add_posture_guidance_options(parser):
+    """关节角 + 肌肉激活组合引导（病态体态生成）。全部带默认值，不影响原版采样。
+    env 变量（GUIDANCE_MODE / JOINT_WEIGHT / MUSCLE_WEIGHT / GUIDANCE_VARIANT /
+    GUIDANCE_KWARGS_JSON）优先级高于这里的 CLI 默认值。"""
+    group = parser.add_argument_group('posture_guidance')
+    group.add_argument("--posture_instructions", nargs="+", default=[], type=str,
+                       help="关节角约束指令列表，如 骨盆前倾。空=不启用关节项。")
+    group.add_argument("--guidance_mode", default="joint", choices=["joint", "muscle", "both"],
+                       help="组合 loss 模式：joint=仅关节角，muscle=仅肌肉激活，both=两者。")
+    group.add_argument("--joint_weight", default=1.0, type=float, help="关节项权重 w_joint。")
+    group.add_argument("--muscle_weight", default=1.0, type=float, help="肌肉项权重 w_muscle。")
+    group.add_argument("--posture_lbfgs_steps", default=5, type=int, help="V1 内层步数（legacy）。")
+    group.add_argument("--posture_lr", default=0.05, type=float, help="V1 学习率（legacy）。")
+    # 肌肉代理相关
+    group.add_argument("--muscle_ckpt", default="", type=str,
+                       help="motion2muscle 冻结代理权重 net_best_*.pth 路径（muscle/both 必填）。")
+    group.add_argument("--muscle_posture", default="anterior_pelvic_tilt", type=str,
+                       help="POSTURE_PRIORS 病态名（默认 anterior_pelvic_tilt = 骨盆前倾）。")
+    group.add_argument("--muscle_assets_dir", default="motion2muscle", type=str,
+                       help="motion2muscle 资产目录（muscle_names.txt / posture_loss*.py 等）。")
+    group.add_argument("--muscle_same_norm", action="store_true", default=True,
+                       help="代理与 MDM 用同一套 Mean/Std（默认 True，跳过换算，见 HANDOFF §6.1）。")
+    group.add_argument("--muscle_diff_norm", dest="muscle_same_norm", action="store_false",
+                       help="代理与 MDM 用不同 Mean/Std，需配合 --proxy_mean_path/--proxy_std_path。")
+    group.add_argument("--proxy_mean_path", default=None, type=str, help="代理 Mean.npy（same_norm=False 时用）。")
+    group.add_argument("--proxy_std_path", default=None, type=str, help="代理 Std.npy（same_norm=False 时用）。")
 
 
 def add_edit_options(parser):
