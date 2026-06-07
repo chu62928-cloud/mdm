@@ -114,6 +114,24 @@ def _read_variant_config_from_env():
     return variant, variant_kwargs, diagnostic
 
 
+def _read_muscle_config_from_env():
+    """
+    组合 loss 的模式与权重配置（与 GUIDANCE_VARIANT 同风格）。
+    Returns (mode, joint_weight, muscle_weight)。
+        GUIDANCE_MODE  : "joint" | "muscle" | "both"（默认 joint，行为同历史）
+        JOINT_WEIGHT   : 关节项权重（默认 1.0）
+        MUSCLE_WEIGHT  : 肌肉项权重（默认 1.0）
+    显式传入的 CLI 值（经 p_sample_loop 参数）优先于 env；这里只在 env 设置了才覆盖。
+    """
+    mode = os.environ.get("GUIDANCE_MODE", None)
+    if mode is not None:
+        mode = mode.lower()
+    def _f(name):
+        v = os.environ.get(name, None)
+        return None if v is None else float(v)
+    return mode, _f("JOINT_WEIGHT"), _f("MUSCLE_WEIGHT")
+
+
 class GaussianDiffusion:
     """
     Utilities for training and sampling diffusion models.
@@ -469,6 +487,10 @@ class GaussianDiffusion:
         posture_lbfgs_steps=5,
         posture_lr=0.05,
         posture_fk_fn=None,
+        muscle_guidance=None,
+        guidance_mode=None,
+        joint_weight=None,
+        muscle_weight=None,
     ):
         final = None
         if dump_steps is not None:
@@ -496,6 +518,10 @@ class GaussianDiffusion:
             posture_lbfgs_steps=posture_lbfgs_steps,
             posture_lr=posture_lr,
             posture_fk_fn=posture_fk_fn,
+            muscle_guidance=muscle_guidance,
+            guidance_mode=guidance_mode,
+            joint_weight=joint_weight,
+            muscle_weight=muscle_weight,
         )):
             if dump_steps is not None and i in dump_steps:
                 dump.append(deepcopy(sample["sample"]))
@@ -526,6 +552,11 @@ class GaussianDiffusion:
         posture_lbfgs_steps=5,
         posture_lr=0.05,
         posture_fk_fn=None,
+        # ---------- 肌肉/组合引导参数（全部有默认值，不传等同纯关节）----------
+        muscle_guidance=None,
+        guidance_mode=None,
+        joint_weight=None,
+        muscle_weight=None,
     ):
         """
         Generate samples from the model and yield intermediate samples from
@@ -574,16 +605,24 @@ class GaussianDiffusion:
             from tqdm.auto import tqdm
             indices = tqdm(indices)
 
+        # -------- 解析组合 loss 模式 / 权重（env 覆盖 CLI 默认）--------
+        env_mode, env_jw, env_mw = _read_muscle_config_from_env()
+        guidance_mode = (env_mode or guidance_mode or "joint").lower()
+        joint_weight = env_jw if env_jw is not None else (joint_weight if joint_weight is not None else 1.0)
+        muscle_weight = env_mw if env_mw is not None else (muscle_weight if muscle_weight is not None else 1.0)
+
+        has_joint = (posture_instructions is not None
+                     and len(posture_instructions) > 0
+                     and posture_fk_fn is not None)
+        has_muscle = muscle_guidance is not None and guidance_mode in ("muscle", "both")
+
         # -------- 初始化 guidance --------
         guidance = None
-        use_guidance = (
-            posture_instructions is not None
-            and len(posture_instructions) > 0
-            and posture_fk_fn is not None
-        )
+        use_guidance = (has_joint or has_muscle) and posture_fk_fn is not None
         if use_guidance:
             from posture_guidance.controller import PostureGuidance
-            guidance = PostureGuidance(instructions=posture_instructions)
+            # 纯肌肉模式下 instructions 可能为空，PostureGuidance([]) 的 specs 为空、loss≈0
+            guidance = PostureGuidance(instructions=posture_instructions or [])
 
         # 读取 variant 配置（从环境变量）
         variant_name, variant_kwargs, diagnostic = _read_variant_config_from_env()
@@ -652,6 +691,10 @@ class GaussianDiffusion:
                     legacy_lbfgs_steps=posture_lbfgs_steps,
                     legacy_lr=posture_lr,
                     diagnostic=diagnostic,
+                    muscle_guidance=muscle_guidance,
+                    muscle_mode=guidance_mode,
+                    joint_weight=joint_weight,
+                    muscle_weight=muscle_weight,
                 )
 
                 # Resample x_{t-1} = mu_t_updated + sigma_t * z
@@ -701,6 +744,10 @@ class GaussianDiffusion:
         legacy_lbfgs_steps,
         legacy_lr,
         diagnostic,
+        muscle_guidance=None,
+        muscle_mode="joint",
+        joint_weight=1.0,
+        muscle_weight=1.0,
     ):
         """
         Dispatch to one of 5 guidance variants. Returns updated mu_t.
@@ -708,13 +755,27 @@ class GaussianDiffusion:
         Each variant reads its own kwargs from variant_kwargs dict.
         Variants V2/V3/V5 require model + model_kwargs to compute x0_hat
         with gradients enabled.
+
+        组合 loss（关节 + 肌肉）只接到统一接口 v2_dps 和 v6（见 plan）。其余
+        variant（v1/v2b/v3/v4/v5/v2_dps_norm）保持纯关节行为不变。
         """
-        # Build a guidance loss closure that all variants share
+        # Build a guidance loss closure that all variants share（纯关节，向后兼容）
         def guidance_loss_fn(q, t_in, T_in, spec_schedule_override=None):
             # anchor 保证返回值始终连接到 q（grad_fn 不为 None），
             # 即使所有 target 在当前时间步都不激活（loss 值为 0）。
             anchor = q.sum() * 0.0
             return guidance.compute_loss(q, t_in, T_in, spec_schedule_override=spec_schedule_override) + anchor
+
+        # 组合引导：把关节 + 肌肉两路合成一个可微 motion_loss（v2_dps / v6 用）
+        from posture_guidance.combined_loss import CombinedGuidance
+        combined = CombinedGuidance(
+            posture=guidance,
+            muscle=muscle_guidance,
+            fk_fn=posture_fk_fn,
+            mode=muscle_mode,
+            w_joint=joint_weight,
+            w_muscle=muscle_weight,
+        )
 
         if variant_name == "v1_mu_sgd":
             mu_new = self._guidance_v1_mu_sgd(
@@ -734,6 +795,7 @@ class GaussianDiffusion:
                 fk_fn=posture_fk_fn,
                 guidance=guidance,
                 guidance_loss_fn=guidance_loss_fn,
+                combined=combined,
                 **variant_kwargs,
             )
 
@@ -792,6 +854,7 @@ class GaussianDiffusion:
                 fk_fn=posture_fk_fn,
                 guidance=guidance,
                 guidance_loss_fn=guidance_loss_fn,
+                combined=combined,
                 **variant_kwargs,
             )
 
@@ -871,7 +934,7 @@ class GaussianDiffusion:
     def _guidance_v2_dps(
         self, *, mu_t, x_t, t_int, t_tensor, T,
         model, model_kwargs, fk_fn, guidance_loss_fn,
-        guidance=None,
+        guidance=None, combined=None,
         s=30.0, schedule="last_quarter", base_weight=1.0,
         spec_schedule_override=None,
         manifold_project=False, manifold_alpha=1.0,
@@ -931,21 +994,33 @@ class GaussianDiffusion:
 
             # 将外层 schedule 透传给 controller，保持内外一致
             _spec_sched = spec_schedule_override if spec_schedule_override is not None else schedule
-            if loss_form == "huber" and guidance is not None:
-                anchor = q.sum() * 0.0
-                loss = base_weight * guidance.compute_loss(
-                    q, t_int, T,
-                    loss_form="huber",
+            if combined is not None:
+                # 统一接口：组合 loss = w_joint·关节 − w_muscle·肌肉（梯度均穿过 MDM）
+                loss = base_weight * combined.motion_loss(
+                    x0_hat, t_int, T,
+                    loss_form=loss_form,
                     huber_delta=huber_delta,
                     spec_schedule_override=_spec_sched,
-                ) + anchor
+                )
+                muscle_active = combined.muscle_active
             else:
-                loss = base_weight * guidance_loss_fn(q, t_int, T, spec_schedule_override=_spec_sched)
+                # 向后兼容（无组合对象时）：纯关节
+                if loss_form == "huber" and guidance is not None:
+                    anchor = q.sum() * 0.0
+                    loss = base_weight * guidance.compute_loss(
+                        q, t_int, T,
+                        loss_form="huber",
+                        huber_delta=huber_delta,
+                        spec_schedule_override=_spec_sched,
+                    ) + anchor
+                else:
+                    loss = base_weight * guidance_loss_fn(q, t_int, T, spec_schedule_override=_spec_sched)
+                muscle_active = False
             if loss.grad_fn is None:
                 return mu_t
 
-            # loss=0 说明当前 x0_hat 预测的角度已满足约束，无需推（仅 hinge 可能为 0）
-            if loss_form == "hinge" and loss.item() == 0.0:
+            # loss=0 说明当前 x0_hat 预测的角度已满足约束，无需推（仅 hinge 且无肌肉项时可早退）
+            if loss_form == "hinge" and not muscle_active and float(loss.detach()) == 0.0:
                 return mu_t
 
             grad = th.autograd.grad(loss, x_t_var)[0]
@@ -1243,6 +1318,7 @@ class GaussianDiffusion:
     def _guidance_v6_closed_loop(
         self, *, mu_t, x_t, pred_xstart, t_int, t_tensor, T,
         model, model_kwargs, fk_fn, guidance, guidance_loss_fn,
+        combined=None,
         # PID gains (calibrated for RAW grad — |grad|~0.2, s_t~80 → |Δμ|~16)
         Kp=80.0, Ki=1.0, Kd=5.0,
         s_min=0.5, s_max=50.0, I_max=20.0,
@@ -1403,16 +1479,28 @@ class GaussianDiffusion:
             if q.grad_fn is None:
                 return mu_t
 
-            # 主 loss + 时域平滑。loss_form="huber" → 过推时 grad 反转可拉回
+            # 主 loss + 时域平滑。loss_form="huber" → 过推时 grad 反转可拉回。
+            # combined.motion_loss 在关节项之上叠加 −w_muscle·肌肉项（both 模式），
+            # 纯关节（mode=joint）时与原 guidance.compute_loss 等价。
             anchor = q.sum() * 0.0
-            loss = base_weight * guidance.compute_loss(
-                q, t_int, T,
-                temporal_smoothness_weight=lambda_smooth,
-                loss_form=loss_form,
-                huber_delta=huber_delta,
-                huber_direction_override=huber_direction if loss_form == "huber" else None,
-                spec_schedule_override=spec_schedule_override,
-            ) + anchor
+            if combined is not None:
+                loss = base_weight * combined.motion_loss(
+                    x0_hat, t_int, T,
+                    temporal_smoothness_weight=lambda_smooth,
+                    loss_form=loss_form,
+                    huber_delta=huber_delta,
+                    huber_direction_override=huber_direction if loss_form == "huber" else None,
+                    spec_schedule_override=spec_schedule_override,
+                ) + anchor
+            else:
+                loss = base_weight * guidance.compute_loss(
+                    q, t_int, T,
+                    temporal_smoothness_weight=lambda_smooth,
+                    loss_form=loss_form,
+                    huber_delta=huber_delta,
+                    huber_direction_override=huber_direction if loss_form == "huber" else None,
+                    spec_schedule_override=spec_schedule_override,
+                ) + anchor
             if loss.grad_fn is None:
                 return mu_t
             # 旧的 `loss.item()==0.0` 早退已删除：
