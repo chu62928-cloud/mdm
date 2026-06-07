@@ -8,11 +8,25 @@ Architecture:
   pos_encoder:      Sinusoidal PositionalEncoding (d_model=256, max_len=5000)
   transformer_encoder: 16 x TransformerEncoderLayer(d_model=256, nhead=8, dim_feedforward=512)
   out_model.0:      Conv1d(256, 402, kernel=3)
-  output:           Sigmoid -> [0,1]
+  output:           muscle activations (see FINAL ACTIVATION note below)
 
 Default parameters match the delivered checkpoint (width=256, nhead=8, num_layers=16).
+
+FINAL ACTIVATION (important — fixes the "all activations ≈ 0.5" bug)
+-------------------------------------------------------------------
+The first reconstruction wrapped the output in `sigmoid`. But the checkpoint was
+trained WITHOUT a final sigmoid: its raw output already lands in ~[0, 0.2]
+(midterm Table 4 reference activations are 0.03–0.15). Applying an extra sigmoid
+maps 0.03–0.15 -> 0.508–0.537, i.e. exactly the degenerate 0.50–0.53 band that was
+observed, which flattens per-muscle structure and collapses the input→output
+Jacobian (→ near-zero muscle guidance signal).
+
+So `final_activation` defaults to "none" (raw output, matches the checkpoint).
+Override with the env var `M2M_FINAL_ACT` ∈ {"none","sigmoid","relu","clamp"} or the
+constructor arg to A/B test against the original.
 """
 import math
+import os
 import torch
 import torch.nn as nn
 from torch.nn import TransformerEncoder, TransformerEncoderLayer
@@ -54,8 +68,12 @@ class MotionToMuscleModel(nn.Module):
         width: int = 256,
         nhead: int = 8,
         num_layers: int = 16,
+        final_activation: str = None,
     ):
         super().__init__()
+        # env 覆盖（便于 A/B 测试，不改代码）。默认 "none" = 不加 sigmoid，匹配 checkpoint。
+        self.final_activation = (final_activation
+                                 or os.environ.get("M2M_FINAL_ACT", "none")).lower()
         # Attribute names match checkpoint keys: 'model.0.weight', 'model.0.bias'
         blocks = [
             nn.Conv1d(input_width, width, kernel_size=3, stride=1, padding=1),
@@ -92,8 +110,14 @@ class MotionToMuscleModel(nn.Module):
         x = self.out_model(x)                             # (B, 402, T)
         # (B, 402, T) -> (B, T, 402)
         x = x.permute(0, 2, 1)
-        # [0, 1] range for muscle activations
-        x = torch.sigmoid(x)
+        # 最终激活：默认 "none"（匹配 checkpoint，输出 ~0.03-0.15）。
+        if self.final_activation == "sigmoid":
+            x = torch.sigmoid(x)
+        elif self.final_activation == "relu":
+            x = torch.relu(x)
+        elif self.final_activation == "clamp":
+            x = x.clamp(0.0, 1.0)
+        # "none": 原样输出
         return x
 
 
