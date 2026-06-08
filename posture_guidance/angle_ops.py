@@ -136,7 +136,7 @@ def pelvis_tilt_angle(q: torch.Tensor) -> torch.Tensor:
     # 后倾时 forward<0 → tilt 为负
     tilt = torch.atan2(forward_proj, upward_proj.clamp(min=EPS))
  
-    return -tilt
+    return tilt
 
 def foot_floor_distance(q: torch.Tensor, side: str = "left") -> torch.Tensor:
     """
