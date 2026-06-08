@@ -5,16 +5,16 @@
 # Each invocation generates ONE sample (baseline + guided comparison).
 #
 # Usage:
-#   MODE=joint   POSTURE=骨盆前倾 SEED=42 bash new/run_posture_pipeline_v2.sh
-#   MODE=muscle  POSTURE=骨盆前倾 SEED=42 MUSCLE_CKPT=path/to/net_best_loss.pth bash new/run_posture_pipeline_v2.sh
-#   MODE=both    POSTURE=骨盆前倾 SEED=42 MUSCLE_CKPT=path/to/net_best_loss.pth bash new/run_posture_pipeline_v2.sh
+#   MODE=joint   POSTURE=anterior_pelvic_tilt SEED=42 bash new/run_posture_pipeline_v2.sh
+#   MODE=muscle  POSTURE=anterior_pelvic_tilt SEED=42 MUSCLE_CKPT=path/to/net_best_loss.pth bash new/run_posture_pipeline_v2.sh
+#   MODE=both    POSTURE=anterior_pelvic_tilt SEED=42 MUSCLE_CKPT=path/to/net_best_loss.pth bash new/run_posture_pipeline_v2.sh
 # =============================================================================
 
 set -e
 
 # ---- User config ----
 MODE="${MODE:-joint}"
-POSTURE="${POSTURE:-骨盆前倾}"
+POSTURE="${POSTURE:-anterior_pelvic_tilt}"
 SEED="${SEED:-42}"
 TEXT_PROMPT="${TEXT_PROMPT:-a person is walking forward}"
 MOTION_LENGTH="${MOTION_LENGTH:-6.0}"
@@ -24,7 +24,8 @@ NUM_SAMPLES="${NUM_SAMPLES:-1}"
 PROJECT_ROOT="/root/autodl-tmp/motion-diffusion-model"
 MODEL_PATH="${MODEL_PATH:-./save/humanml_trans_dec_512_bert/model000600000.pt}"
 MUSCLE_CKPT="${MUSCLE_CKPT:-motion2muscle/checkpoints/transformer_baseline_full/net_best_loss.pth}"
-MUSCLE_POSTURE="${MUSCLE_POSTURE:-anterior_pelvic_tilt}"
+# Both joint and muscle modules now use the same English posture name via registry aliases
+MUSCLE_POSTURE="${MUSCLE_POSTURE:-${POSTURE}}"
 MUSCLE_ASSETS_DIR="${MUSCLE_ASSETS_DIR:-motion2muscle}"
 
 # ---- Guidance config ----

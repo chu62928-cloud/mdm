@@ -1,14 +1,21 @@
 """
-muscle_guidance_mdm —— MDM 侧对接 motion2muscle 冻结代理 + posture loss 的适配层。
+muscle_guidance_mdm — MDM side integration of motion2muscle proxy + posture loss.
 
-命名为 muscle_guidance_mdm（而非 muscle_guidance）以避免与 motion2muscle/ 内部的
-muscle_guidance.py 模块重名（后者在 build_muscle_guidance 里被加入 sys.path 后 import）。
+Named muscle_guidance_mdm (not muscle_guidance) to avoid collision with
+motion2muscle/muscle_guidance.py. The internal module is imported via
+sys.path manipulation in build_muscle_guidance.
 
-对外主要入口：
-    build_muscle_guidance(...) -> motion2muscle.MuscleGuidance（已就绪，待 build_reference）
-    load_frozen_proxy(...)     -> 冻结的 nn.Module 代理
-    muscle_guidance_loss(...)  -> 给采样循环用的可微肌肉损失（默认 dense 引导版）
+Primary API:
+    build_muscle_guidance(...) -> motion2muscle.MuscleGuidance (with build_reference)
+    load_frozen_proxy(...)     -> frozen nn.Module
+    muscle_guidance_loss(...)  -> differentiable muscle loss (default: dense guidance)
 """
+import os as _os, sys as _sys
+# Ensure motion2muscle/ is importable before loading dense_loss (which imports posture_loss_torch)
+_M2M = _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))), "motion2muscle")
+if _M2M not in _sys.path:
+    _sys.path.insert(0, _M2M)
+
 from .build import build_muscle_guidance, load_mint_cols
 from .loader import load_frozen_proxy
 from .dense_loss import dense_posture_guidance_loss
@@ -16,26 +23,26 @@ from .dense_loss import dense_posture_guidance_loss
 
 def muscle_guidance_loss(mg, x_btc, kind: str = "guidance", margin: float = 0.3):
     """
-    统一肌肉损失入口（供 CombinedGuidance / 评估调用）。
+    Unified muscle loss entry for CombinedGuidance / other callers.
 
     Args:
-        mg     : motion2muscle.MuscleGuidance 实例（已 build_reference）。
-        x_btc  : (B,T,263) MDM 归一化空间的运动，带梯度。
+        mg     : motion2muscle.MuscleGuidance instance (with build_reference() called)
+        x_btc  : (B,T,263) MDM-normalized motion, requires grad.
         kind   :
-            "guidance" —— dense 目标匹配损失（处处可微、起点梯度非零）。
-                          **最小化 = 朝病态**（生成时用）。
-            "clinical" —— 肌肉队原版 detection 损失（带阈值，>0=病态）。
-                          仅用于评估/复刻 midterm Table 3；不要用于引导。
-        margin : dense 版的方向性目标幅度。
+            "guidance" — dense target-matching loss (differentiable, grad non-zero at ref);
+                          **minimise = toward pathology**. Use during inference.
+            "clinical" — original detection loss (>0 = pathology).
+                          Use for evaluation / midterm Table 3.
+        margin : dense mode pathological target margin.
     Returns:
-        标量 tensor。
+        scalar tensor.
     """
     if kind == "clinical":
         return mg.loss(x_btc)
     if kind != "guidance":
         raise ValueError(f"kind must be 'guidance' or 'clinical', got {kind!r}")
-    assert mg.reference_acts is not None, "先调用 mg.build_reference() / set_reference()"
-    acts = mg._activations(x_btc)          # (B,T,402)，梯度连到 x_btc（经冻结代理）
+    assert mg.reference_acts is not None, "call mg.build_reference() / set_reference() first"
+    acts = mg._activations(x_btc)
     return dense_posture_guidance_loss(
         acts, mg.group_index, mg.posture_name, mg.reference_acts,
         component_weights=mg.component_weights, margin=margin)
