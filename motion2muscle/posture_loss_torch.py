@@ -131,7 +131,10 @@ def compute_posture_loss_torch(activations: torch.Tensor,
             mean_under = a_under.mean(dim=-1)
             if ref_u >= MIN_REF_FOR_RATIO:                      # RATIO mode
                 r_threshold = (ref_o / (ref_u + eps)) * (1.0 + delta)
-                r_current = mean_over / (mean_under + eps)
+                # clamp 当前分母：稀疏肌束（如 rectus_abdominis，1 肌束/侧）被引导压到
+                # ~1e-3 时，over/under 比值会炸到几十倍，掩盖真实信号。下限 0.05 ≈
+                # 正常步态激活的合理底（原始范围 ~[0,0.2]）。
+                r_current = mean_over / (mean_under.clamp(min=0.05) + eps)
                 term = _batch_mean(_relu(r_current - r_threshold))
             else:                                               # ABS-DIFF mode
                 threshold = ref_o * (1.0 + delta)
