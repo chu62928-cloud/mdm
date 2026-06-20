@@ -189,7 +189,7 @@ def register_posture(spec: LossSpec):
 register_posture(LossSpec(
     name="骨盆前倾",
     angle_fn=ops.pelvis_tilt_angle,           # 注意要用修复后的版本
-    target_deg=20.0,                          # 病态前倾 20°
+    target_deg=20.0,                          # 骨盆前倾
     direction="greater_than",
     tolerance_deg=2.0,
     phase="always",
