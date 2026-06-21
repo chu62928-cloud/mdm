@@ -8,18 +8,21 @@ new/probe_proxy_inversion.py
 ----
 诊断已确认 H_A：joint-guided 的真实 APT 几何（+15~20°）喂进 proxy，得到的绝对髋屈/伸比 < 1
 （= PPT 肌肉形态）。换 reference 救不了，因为倒置在 proxy 的输入→激活 Jacobian 里。
-但「为什么倒置」尚未实证区分三种成因：
+本脚本实证区分三种成因：
   (a) OOD 外推 —— 分布内正确、仅在 APT/OOD 区间倒置；
-  (b) 内在弱/被混淆自由度 —— proxy 从没真正编码骨盆倾角；
-  (c) 量纲错配 —— proxy 输出瞬时激活 ≠ 临床张力性期望（本脚本无法直接证伪，仅在裁决中提示）。
+  (b) 内在弱/未编码自由度 —— proxy 从没在数据里编码骨盆倾角→肌肉关系；
+  (c) 读出/模板错配 —— proxy 编码了倾角，但不在临床模板用的 flex/ext 轴上（可换轴修复）。
 
-本脚本三个子分析：
+子分析
+------
   A. 受控扫描（证据图）：沿 baseline↔joint-guided 方向插值，画 proxy flex/ext vs 真实骨盆角，
      预期单调递减；现有手点(baseline≈6.0, joint-APT≈0.73)应落在曲线上（回归锚点）。
-  B. 分布内检验（决定性区分 a vs b/c）：真实 HumanML3D 步行片在自然角度范围内，
-     看 proxy flex/ext↔骨盆角斜率符号。正确(正斜率)=纯 OOD；反/平=内在缺陷。
-  C. 单自由度探针（隔离 Jacobian，实验性）：冻住四肢、只在矢状面旋转上半身改变骨盆倾角，
-     re-encode→proxy，量纯倾角→激活响应，排除步态混淆。
+  B（分布内，真实 walking clips）三联：
+     B1 跨片均值：每片一个点（均值倾角 vs 均值 flex/ext），隔离步态相位噪声 → 决定性区分 (a) vs (b)。
+     B2 按角分箱：分布内帧按倾角分箱、画每箱均值 flex/ext → 去噪看分布内曲线形状。
+     B3 全功能群扫描：逐 ROLLUP_GROUPS 算「该群激活 vs 倾角」的相关并排序 →
+        无群编码=(b) 可表征性缺失；有群(正号)编码=(c) 读出错配、可换轴修复。
+  （原 C 单自由度探针已弃用：只转上半身=解剖不可能姿势=又引回 OOD 混淆，且 process_file 重编码脆弱。）
 
 用法
 ----
@@ -28,9 +31,9 @@ new/probe_proxy_inversion.py
         --muscle_ckpt motion2muscle/checkpoints/transformer_baseline_full/net_best_loss.pth \
         --data_dir dataset/HumanML3D \
         --out_dir output_0608/proxy_inversion \
-        --max_clips 200 --probe --device cuda
+        --max_clips 200 --device cuda
 
-  - 不传 --data_dir 则跳过 B；不传 --probe 则跳过 C。A 始终运行（只需 --joint_npy）。
+  - 不传 --data_dir 则只跑 A。
 """
 import argparse
 import math
@@ -55,11 +58,10 @@ for p in (_ROOT, _ASSETS, _THIS):
 from data_loaders.humanml.data.dataset import HumanML3D
 from data_loaders.humanml.scripts.motion_process import recover_from_ric
 from muscle_guidance_mdm.build import build_muscle_guidance
-from muscle_rollup import get_indices
+from muscle_rollup import ROLLUP_GROUPS, get_indices
 from posture_guidance.angle_ops import pelvis_tilt_angle
-from posture_guidance.joint_indices import get_joint_idx
 
-# 复用 analyze_pelvis_tilt 的分布内加载与直立过滤（同目录）
+# 复用 analyze_pelvis_tilt 的直立过滤与步行筛选（同目录）
 from analyze_pelvis_tilt import upright_mask, filter_walking_clips  # noqa: E402
 
 # 关键肌群：髋屈肌(APT 应高) vs 髋伸肌(APT 应低)
@@ -85,7 +87,7 @@ def make_fk_fn(t2m, device):
 
 
 def group_frame_act(acts, mint_cols, group):
-    """acts: (T,402) 或 (B,T,402) -> 该肌群(左右合并)逐帧均值 (T,) / (B,T)；缺失 None。"""
+    """acts: (T,402)/(B,T,402) -> 该肌群(左右合并)逐帧均值；缺失 None。"""
     idx = []
     for side in ("_R", "_L"):
         idx += get_indices(group + side, mint_cols)
@@ -95,15 +97,25 @@ def group_frame_act(acts, mint_cols, group):
 
 
 def flex_ext_per_frame(acts, mint_cols, eps=1e-12):
-    """逐帧屈/伸比 (T,)。屈=髂腰+股直均值，伸=臀大。"""
+    """逐帧屈/伸比。屈=髂腰+股直均值，伸=臀大。"""
     flex = np.mean([group_frame_act(acts, mint_cols, g) for g in FLEXORS], axis=0)
     ext = group_frame_act(acts, mint_cols, EXTENSOR)
     return flex / (ext + eps)
 
 
 def normalize_mdm(raw_263, t2m):
-    """raw (T,263) -> MDM 归一化 (T,263)。"""
     return (raw_263 - t2m.mean) / t2m.std
+
+
+def base_group_names():
+    """从 ROLLUP_GROUPS 的 _R/_L 键里取唯一基名。"""
+    bases = set()
+    for k in ROLLUP_GROUPS:
+        if k.endswith("_R") or k.endswith("_L"):
+            bases.add(k[:-2])
+        else:
+            bases.add(k)
+    return sorted(bases)
 
 
 # ──────────────────────────────────────────────────────────
@@ -114,18 +126,18 @@ def analysis_A(mg, fk_fn, joint_npy, device, alphas):
     print("A. 受控扫描：proxy flex/ext vs 真实骨盆角（沿 baseline↔joint-guided 插值）")
     print("=" * 70)
     data = np.load(joint_npy, allow_pickle=True).item()
-    xb = torch.from_numpy(np.asarray(data["motion_hml_tj"], np.float32)).to(device)        # (1,T,263)
+    xb = torch.from_numpy(np.asarray(data["motion_hml_tj"], np.float32)).to(device)
     xg = torch.from_numpy(np.asarray(data["motion_hml_tj_guided"], np.float32)).to(device)
 
     angles, ratios, groups = [], [], {g: [] for g in REPORT_GROUPS}
     print(f"\n  {'alpha':>6} {'pelvis°':>9} {'flex/ext':>10}")
     print("  " + "-" * 28)
     for a in alphas:
-        x = xb + a * (xg - xb)                                  # (1,T,263) 归一化空间
+        x = xb + a * (xg - xb)
         with torch.no_grad():
-            q = fk_fn(x.permute(0, 2, 1).unsqueeze(2))          # (1,T,22,3)
+            q = fk_fn(x.permute(0, 2, 1).unsqueeze(2))
             ang = float(torch.rad2deg(pelvis_tilt_angle(q).mean()))
-            acts = mg._activations(x).cpu().numpy()[0]          # (T,402)
+            acts = mg._activations(x).cpu().numpy()[0]
         r = float(np.mean(flex_ext_per_frame(acts, mg.mint_cols)))
         angles.append(ang); ratios.append(r)
         for g in REPORT_GROUPS:
@@ -134,23 +146,18 @@ def analysis_A(mg, fk_fn, joint_npy, device, alphas):
         print(f"  {a:>6.2f} {ang:>+8.1f}° {r:>10.3f}{tag}")
 
     angles, ratios = np.array(angles), np.array(ratios)
-    # 单调性：骨盆角升序后 flex/ext 是否单调递减
-    order = np.argsort(angles)
-    mono = np.all(np.diff(ratios[order]) <= 1e-6)
     slope = float(np.polyfit(angles, ratios, 1)[0])
+    order = np.argsort(angles)
+    mono = bool(np.all(np.diff(ratios[order]) <= 1e-6))
     print(f"\n  线性斜率 d(flex/ext)/d(pelvis°) = {slope:+.4f}"
-          f"   {'(单调递减 ✓ = 逆映射)' if slope < 0 else '(非递减)'}")
-    print(f"  严格单调递减: {mono}")
+          f"   {'(单调递减 ✓ = 逆映射)' if slope < 0 else '(非递减)'}   严格单调递减: {mono}")
     return dict(angles=angles, ratios=ratios, groups=groups, slope=slope, mono=mono)
 
 
 # ──────────────────────────────────────────────────────────
-# B. 分布内检验（决定性区分 OOD vs 内在）
+# B. 分布内（真实 walking clips）：一次加载，缓存逐帧 + 跨片 + 全群
 # ──────────────────────────────────────────────────────────
-def analysis_B(mg, data_dir, t2m, device, max_clips, walking_only, min_height):
-    print("\n" + "=" * 70)
-    print("B. 分布内检验：真实步行片自然角度范围内 flex/ext vs 骨盆角")
-    print("=" * 70)
+def collect_indist(mg, data_dir, t2m, device, max_clips, walking_only, min_height):
     data_dir = Path(data_dir)
     vec_dir = data_dir / "new_joint_vecs"
     if not vec_dir.exists():
@@ -164,150 +171,154 @@ def analysis_B(mg, data_dir, t2m, device, max_clips, walking_only, min_height):
         ids = ids[:max_clips]
     print(f"  处理 {len(ids)} clips ...")
 
-    A_all, R_all = [], []
+    # 预备各功能群的列下标（左右合并）
+    bases = base_group_names()
+    gidx = {}
+    for b in bases:
+        idx = get_indices(b + "_R", mg.mint_cols) + get_indices(b + "_L", mg.mint_cols)
+        if idx:
+            gidx[b] = idx
+
+    ang_chunks, fe_chunks = [], []
+    gchunks = {b: [] for b in gidx}
+    clip_means = []
+    n_dim = t2m.mean.shape[0]
     for cid in ids:
         try:
-            raw = np.load(vec_dir / f"{cid}.npy").astype(np.float32)   # (T,263) 未归一化
-            if raw.ndim != 2 or raw.shape[1] != t2m.mean.shape[0]:
+            raw = np.load(vec_dir / f"{cid}.npy").astype(np.float32)
+            if raw.ndim != 2 or raw.shape[1] != n_dim:
                 continue
             with torch.no_grad():
-                q = recover_from_ric(torch.from_numpy(raw)[None], 22).squeeze(0)  # (T,22,3)
-                m = upright_mask(q, min_height=min_height).numpy()                # (T,)
+                q = recover_from_ric(torch.from_numpy(raw)[None], 22).squeeze(0)   # (T,22,3)
+                m = upright_mask(q, min_height=min_height).numpy()
                 if m.sum() < 1:
                     continue
-                ang = pelvis_tilt_angle(q).numpy() * (180.0 / math.pi)           # (T,)
-                xn = torch.from_numpy(normalize_mdm(raw, t2m))[None].to(device)  # (1,T,263)
-                acts = mg._activations(xn).cpu().numpy()[0]                      # (T,402)
-            r = flex_ext_per_frame(acts, mg.mint_cols)                          # (T,)
-            A_all.append(ang[m]); R_all.append(r[m])
+                ang = pelvis_tilt_angle(q).numpy() * (180.0 / math.pi)            # (T,)
+                xn = torch.from_numpy(normalize_mdm(raw, t2m))[None].to(device)
+                acts = mg._activations(xn).cpu().numpy()[0]                       # (T,402)
+            a_m = ang[m]
+            fe = flex_ext_per_frame(acts, mg.mint_cols)[m]
+            acts_m = acts[m]
+            ang_chunks.append(a_m); fe_chunks.append(fe)
+            for b, idx in gidx.items():
+                gchunks[b].append(acts_m[:, idx].mean(axis=-1))
+            clip_means.append((float(a_m.mean()), float(fe.mean())))
         except Exception as e:
             print(f"    [warn] {cid}: {e}")
             continue
-    if not A_all:
+    if not ang_chunks:
         print("  [跳过] 无有效直立帧")
         return None
-    A_all = np.concatenate(A_all); R_all = np.concatenate(R_all)
-    slope = float(np.polyfit(A_all, R_all, 1)[0])
-    r_pear = float(np.corrcoef(A_all, R_all)[0, 1])
-    print(f"\n  直立帧数: {len(A_all):,}   骨盆角范围: "
-          f"{A_all.min():+.1f}°..{A_all.max():+.1f}° (P5={np.percentile(A_all,5):+.1f}, "
-          f"P95={np.percentile(A_all,95):+.1f})")
-    print(f"  斜率 d(flex/ext)/d(pelvis°) = {slope:+.4f}   Pearson r = {r_pear:+.3f}")
-    if slope > 0:
-        print("  → 分布内斜率为正（前倾↑→flex/ext↑，方向正确）⇒ 成因 (a) OOD 外推")
-    else:
-        print("  → 分布内斜率≤0（方向已反/无关）⇒ 成因 (b)/(c) 内在弱自由度/量纲错配")
-    return dict(angles=A_all, ratios=R_all, slope=slope, pearson=r_pear)
+    return dict(
+        angles=np.concatenate(ang_chunks),
+        flexext=np.concatenate(fe_chunks),
+        group_acts={b: np.concatenate(v) for b, v in gchunks.items()},
+        clip_means=np.array(clip_means),
+    )
 
 
-# ──────────────────────────────────────────────────────────
-# C. 单自由度骨盆旋转探针（实验性）
-# ──────────────────────────────────────────────────────────
-def _rodrigues(axis, theta):
-    """axis (3,) 单位向量, theta 标量(rad) -> R (3,3)。"""
-    a = axis / (np.linalg.norm(axis) + 1e-9)
-    K = np.array([[0, -a[2], a[1]], [a[2], 0, -a[0]], [-a[1], a[0], 0]])
-    return np.eye(3) + np.sin(theta) * K + (1 - np.cos(theta)) * (K @ K)
-
-
-def analysis_C(mg, t2m, joint_npy, device, deltas):
-    """冻住四肢、绕髋中点 medio-lateral 轴旋转上半身，改变骨盆倾角，量纯激活响应。
-
-    注意：通过对 recover_from_ric 得到的关节做几何旋转后，重新用 process_file 编码回 263。
-    process_file 会重算 root 规范化/速度/足触，几何 tilt 应当保留。实验性，失败则跳过。
-    """
+def analysis_B(cache):
     print("\n" + "=" * 70)
-    print("C. 单自由度探针（实验性）：只旋转上半身改变骨盆倾角")
+    print("B. 分布内检验")
     print("=" * 70)
-    try:
-        from data_loaders.humanml.scripts.motion_process import process_file
-    except Exception as e:
-        print(f"  [跳过] 无法导入 process_file: {e}")
-        return None
+    ang, fe, cm = cache["angles"], cache["flexext"], cache["clip_means"]
+    print(f"  直立帧 {len(ang):,}   骨盆角 {ang.min():+.1f}°..{ang.max():+.1f}° "
+          f"(P5={np.percentile(ang,5):+.1f}, P95={np.percentile(ang,95):+.1f})   "
+          f"clips={len(cm)}")
 
-    UPPER = ["spine1", "spine2", "spine3", "neck", "head",
-             "left_collar", "right_collar", "left_shoulder", "right_shoulder",
-             "left_elbow", "right_elbow", "left_wrist", "right_wrist"]
-    upper_idx = [get_joint_idx(n) for n in UPPER]
+    # --- B0 逐帧（参照，含相位噪声）---
+    s0 = float(np.polyfit(ang, fe, 1)[0]); r0 = float(np.corrcoef(ang, fe)[0, 1])
+    print(f"\n  B0 逐帧:  slope={s0:+.4f}  r={r0:+.3f}  (相位噪声主导，仅参照)")
 
-    data = np.load(joint_npy, allow_pickle=True).item()
-    xb = torch.from_numpy(np.asarray(data["motion_hml_tj"], np.float32))   # (1,T,263)
-    with torch.no_grad():
-        mu_inv = xb.permute(0, 2, 1).unsqueeze(2) * torch.tensor(t2m.std) + torch.tensor(t2m.mean)
-        q0 = recover_from_ric(mu_inv, 22).squeeze(2).squeeze(0).numpy()    # (T,22,3)
+    # --- B1 跨片均值（去相位噪声，决定性）---
+    s1 = float(np.polyfit(cm[:, 0], cm[:, 1], 1)[0]); r1 = float(np.corrcoef(cm[:, 0], cm[:, 1])[0, 1])
+    print(f"  B1 跨片:  slope={s1:+.4f}  r={r1:+.3f}", end="  ")
+    if r1 > 0.2:
+        print("→ 分布内姿势耦合为正(方向正确) ⇒ 倾向 (a) OOD 外推")
+    elif r1 < -0.2:
+        print("→ 分布内姿势耦合为负(已倒置) ⇒ 倾向 (b)/(c) 内在")
+    else:
+        print("→ 分布内姿势与 flex/ext 解耦(≈0) ⇒ 倾向 (b) 未编码/弱自由度")
 
-    angles, ratios = [], []
-    print(f"\n  {'Δapply°':>8} {'pelvis°':>9} {'flex/ext':>10}")
-    print("  " + "-" * 30)
-    for d in deltas:
-        try:
-            q = q0.copy()
-            T = q.shape[0]
-            for t in range(T):
-                lh, rh = q[t, get_joint_idx("left_hip")], q[t, get_joint_idx("right_hip")]
-                center = (lh + rh) / 2.0
-                axis = rh - lh                      # medio-lateral 轴
-                R = _rodrigues(axis, math.radians(d))
-                for j in upper_idx:
-                    q[t, j] = center + R @ (q[t, j] - center)
-            feats = process_file(q, 0.002)[0]       # -> (T-?,263)
-            feats = np.asarray(feats, np.float32)
-            if feats.ndim != 2 or feats.shape[1] != t2m.mean.shape[0]:
-                print(f"  {d:>8.1f}  process_file 输出形状异常 {feats.shape}，跳过该点")
-                continue
-            with torch.no_grad():
-                qf = recover_from_ric(torch.from_numpy(feats)[None], 22).squeeze(0)
-                ang = float(pelvis_tilt_angle(qf).mean() * 180.0 / math.pi)
-                xn = torch.from_numpy(normalize_mdm(feats, t2m))[None].to(device)
-                acts = mg._activations(xn).cpu().numpy()[0]
-            r = float(np.mean(flex_ext_per_frame(acts, mg.mint_cols)))
-            angles.append(ang); ratios.append(r)
-            print(f"  {d:>8.1f} {ang:>+8.1f}° {r:>10.3f}")
-        except Exception as e:
-            print(f"  {d:>8.1f}  [warn] {e}")
+    # --- B2 按角分箱均值 ---
+    print("\n  B2 分箱(均值 flex/ext):")
+    lo, hi = np.percentile(ang, 2), np.percentile(ang, 98)
+    edges = np.linspace(lo, hi, 9)
+    centers, bin_means = [], []
+    for i in range(len(edges) - 1):
+        sel = (ang >= edges[i]) & (ang < edges[i + 1])
+        if sel.sum() < 20:
             continue
-    if len(angles) < 2:
-        print("  [跳过] 有效点不足")
-        return None
-    slope = float(np.polyfit(angles, ratios, 1)[0])
-    print(f"\n  探针斜率 d(flex/ext)/d(pelvis°) = {slope:+.4f}   "
-          f"{'(负=纯倾角→激活也倒置)' if slope < 0 else '(非负)'}")
-    return dict(angles=np.array(angles), ratios=np.array(ratios), slope=slope)
+        c = float((edges[i] + edges[i + 1]) / 2)
+        v = float(fe[sel].mean())
+        centers.append(c); bin_means.append(v)
+        print(f"    [{edges[i]:+5.1f},{edges[i+1]:+5.1f})°  n={int(sel.sum()):6d}  flex/ext={v:.3f}")
+
+    return dict(s0=s0, r0=r0, s1=s1, r1=r1, centers=np.array(centers), bin_means=np.array(bin_means))
+
+
+def analysis_B3(cache, top=8):
+    print("\n" + "=" * 70)
+    print("B3. 全功能群扫描：各群激活 vs 骨盆倾角的分布内相关（逐帧）")
+    print("=" * 70)
+    ang = cache["angles"]
+    rows = []
+    for b, a in cache["group_acts"].items():
+        if np.std(a) < 1e-9:
+            continue
+        r = float(np.corrcoef(ang, a)[0, 1])
+        rows.append((b, r))
+    rows.sort(key=lambda x: x[1])   # 升序：最负在前
+    print(f"\n  最强正相关(倾角↑→激活↑)  Top{top}：")
+    for b, r in rows[::-1][:top]:
+        print(f"    {b:<26} r={r:+.3f}")
+    print(f"\n  最强负相关(倾角↑→激活↓)  Top{top}：")
+    for b, r in rows[:top]:
+        print(f"    {b:<26} r={r:+.3f}")
+    max_pos = max((r for _, r in rows), default=0.0)
+    # 关注临床 APT 应升的髋屈/腰伸群是否有正相关
+    clin_up = ["iliopsoas", "rectus_femoris", "erector_spinae", "psoas"]
+    clin = {b: r for b, r in rows if b in clin_up}
+    print("\n  临床 APT 期望↑的群的实际相关：")
+    for b in clin_up:
+        if b in clin:
+            print(f"    {b:<26} r={clin[b]:+.3f}  {'✓正' if clin[b] > 0.2 else ('✗负' if clin[b] < -0.2 else '≈0')}")
+    return dict(rows=rows, max_pos=max_pos, clin=clin)
 
 
 # ──────────────────────────────────────────────────────────
 # 出图 + 裁决
 # ──────────────────────────────────────────────────────────
-def make_figure(rA, rB, rC, out_dir):
-    n = 1 + (rB is not None) + (rC is not None)
+def make_figure(rA, rB, cache, out_dir):
+    has_B = rB is not None
+    n = 1 + (2 if has_B else 0)
     fig, axes = plt.subplots(1, n, figsize=(5.2 * n, 4.4))
     if n == 1:
         axes = [axes]
-    i = 0
-    ax = axes[i]; i += 1
+    k = 0
+    ax = axes[k]; k += 1
     o = np.argsort(rA["angles"])
     ax.plot(rA["angles"][o], rA["ratios"][o], "o-", color="C3")
     ax.axhline(1.0, ls="--", c="gray", lw=1)
     ax.set_title(f"A. Controlled sweep (slope={rA['slope']:+.3f})")
     ax.set_xlabel("true pelvic tilt (deg, +=anterior)")
     ax.set_ylabel("proxy flex/ext ratio")
-    ax.annotate("clinical APT expects flex/ext>1 here →",
-                xy=(0.02, 0.92), xycoords="axes fraction", fontsize=8, color="gray")
-    if rB is not None:
-        ax = axes[i]; i += 1
-        ax.scatter(rB["angles"], rB["ratios"], s=3, alpha=0.25, color="C0")
-        xs = np.linspace(rB["angles"].min(), rB["angles"].max(), 50)
-        ax.plot(xs, np.polyval(np.polyfit(rB["angles"], rB["ratios"], 1), xs), "C1", lw=2)
+    if has_B:
+        cm = cache["clip_means"]
+        ax = axes[k]; k += 1
+        ax.scatter(cm[:, 0], cm[:, 1], s=10, alpha=0.5, color="C0")
+        xs = np.linspace(cm[:, 0].min(), cm[:, 0].max(), 50)
+        ax.plot(xs, np.polyval(np.polyfit(cm[:, 0], cm[:, 1], 1), xs), "C1", lw=2)
         ax.axhline(1.0, ls="--", c="gray", lw=1)
-        ax.set_title(f"B. In-distribution (slope={rB['slope']:+.3f}, r={rB['pearson']:+.2f})")
-        ax.set_xlabel("true pelvic tilt (deg)"); ax.set_ylabel("proxy flex/ext")
-    if rC is not None:
-        ax = axes[i]; i += 1
-        o = np.argsort(rC["angles"])
-        ax.plot(rC["angles"][o], rC["ratios"][o], "s-", color="C2")
+        ax.set_title(f"B1. Across-clip means (slope={rB['s1']:+.3f}, r={rB['r1']:+.2f})")
+        ax.set_xlabel("clip-mean pelvic tilt (deg)"); ax.set_ylabel("clip-mean flex/ext")
+
+        ax = axes[k]; k += 1
+        if len(rB["centers"]):
+            ax.plot(rB["centers"], rB["bin_means"], "s-", color="C2")
         ax.axhline(1.0, ls="--", c="gray", lw=1)
-        ax.set_title(f"C. Isolated tilt probe (slope={rC['slope']:+.3f})")
-        ax.set_xlabel("imposed pelvic tilt (deg)"); ax.set_ylabel("proxy flex/ext")
+        ax.set_title("B2. In-distribution binned means")
+        ax.set_xlabel("pelvic tilt bin (deg)"); ax.set_ylabel("mean flex/ext")
     fig.tight_layout()
     out = Path(out_dir) / "proxy_inversion.png"
     fig.savefig(out, dpi=150)
@@ -326,26 +337,29 @@ def save_csv(rA, out_dir):
     print(f"  CSV 已保存: {out}")
 
 
-def verdict(rA, rB, rC):
+def verdict(rA, rB, rB3):
     print("\n" + "=" * 70)
     print("裁决")
     print("=" * 70)
-    print(f"  A 受控扫描斜率: {rA['slope']:+.4f}  "
-          f"({'逆映射证据成立 ✓' if rA['slope'] < 0 else '未见逆映射 ✗'})")
+    print(f"  A  受控扫描斜率 {rA['slope']:+.4f}  "
+          f"({'逆映射成立 ✓' if rA['slope'] < 0 else '未见逆映射 ✗'})")
     if rB is None:
-        print("  B 分布内: 未运行（未传 --data_dir）—— 无法区分 OOD vs 内在")
-        cause = "未定（需 B）"
-    elif rB["slope"] > 0:
-        cause = "(a) OOD 外推主导：proxy 分布内方向正确，仅在 APT/OOD 区间倒置"
+        print("  B/B3 未运行（未传 --data_dir）。")
+        return
+    print(f"  B1 跨片  slope={rB['s1']:+.4f}  r={rB['r1']:+.3f}")
+    print(f"  B3 全群最强正相关 r={rB3['max_pos']:+.3f}")
+
+    if rB["r1"] > 0.2:
+        cause = "(a) OOD 外推：分布内姿势耦合为正，proxy 仅在 APT/OOD 区间倒置"
+    elif rB3["max_pos"] > 0.3:
+        top = max(rB3["rows"], key=lambda x: x[1])
+        cause = (f"(c) 读出/模板错配：proxy 编码了倾角（如 {top[0]} r={top[1]:+.2f}），"
+                 f"但不在临床用的 flex/ext 轴上 ⇒ 可换读出轴修复")
     else:
-        cause = "(b)/(c) 内在：proxy 在分布内也未正确编码骨盆倾角（弱自由度/量纲错配）"
-    print(f"  B 分布内斜率: {('%.4f' % rB['slope']) if rB else 'N/A'}")
-    if rC is not None:
-        print(f"  C 探针斜率:   {rC['slope']:+.4f}  "
-              f"({'纯倾角响应也倒置→支持内在' if rC['slope'] < 0 else '纯倾角响应正常→支持 OOD'})")
+        cause = "(b) 可表征性缺失：分布内倾角与所有肌群均弱相关，proxy 未编码骨盆倾角"
     print(f"\n  → 成因结论: {cause}")
-    print("  注: (c) 量纲错配（瞬时激活≠临床张力性期望）本脚本不能单独证伪，")
-    print("      若 B/C 指向内在，需结合真实 EMG/MinT 标签进一步分辨 (b) vs (c)。")
+    if rB["r1"] <= 0.2 and rB3["max_pos"] <= 0.3:
+        print("  注: (b) 与残余 (c) 的彻底分辨需真实 EMG/MinT 标签；本数据支持「未编码/弱」主导。")
 
 
 def main():
@@ -353,8 +367,7 @@ def main():
     ap.add_argument("--joint_npy", required=True, help="joint 模式 comparison.npy（guided=真实 APT 几何）")
     ap.add_argument("--muscle_ckpt", required=True)
     ap.add_argument("--muscle_posture", default="anterior_pelvic_tilt")
-    ap.add_argument("--data_dir", default=None, help="HumanML3D 根目录（含 new_joint_vecs/，传则跑 B）")
-    ap.add_argument("--probe", action="store_true", help="跑 C 单自由度探针（实验性）")
+    ap.add_argument("--data_dir", default=None, help="HumanML3D 根目录（含 new_joint_vecs/，传则跑 B/B3）")
     ap.add_argument("--out_dir", default="output_0608/proxy_inversion")
     ap.add_argument("--max_clips", type=int, default=200)
     ap.add_argument("--walking_only", action="store_true", default=True)
@@ -380,14 +393,18 @@ def main():
 
     alphas = np.linspace(-0.3, 1.3, 17)
     rA = analysis_A(mg, fk_fn, args.joint_npy, device, alphas)
-    rB = analysis_B(mg, args.data_dir, t2m, device, args.max_clips,
-                    args.walking_only, args.min_height) if args.data_dir else None
-    deltas = np.linspace(-15, 25, 9)
-    rC = analysis_C(mg, t2m, args.joint_npy, device, deltas) if args.probe else None
+
+    rB = rB3 = cache = None
+    if args.data_dir:
+        cache = collect_indist(mg, args.data_dir, t2m, device,
+                               args.max_clips, args.walking_only, args.min_height)
+        if cache is not None:
+            rB = analysis_B(cache)
+            rB3 = analysis_B3(cache)
 
     save_csv(rA, args.out_dir)
-    make_figure(rA, rB, rC, args.out_dir)
-    verdict(rA, rB, rC)
+    make_figure(rA, rB, cache, args.out_dir)
+    verdict(rA, rB, rB3)
 
 
 if __name__ == "__main__":
