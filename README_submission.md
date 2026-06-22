@@ -26,7 +26,7 @@ our contribution is layered on top of the original MDM source.
 | `posture_guidance/` | Module 1: joint-angle / IK guidance and the unified guidance framework (registry, combined loss, guidance variants, controller, gait-phase masks). |
 | `muscle_guidance_mdm/` | Module 2 assembly layer: proxy builder, frozen-proxy loader, dense target-matching muscle loss. |
 | `motion2muscle/` | Frozen motion→muscle proxy model, clinical posture loss, muscle roll-up to functional groups, muscle name tables. |
-| `scripts/` | Reproduction pipelines, muscle-space evaluation, figure generation, and diagnostics. |
+| `scripts/` | Reproduction pipelines, muscle-space evaluation and figure generation. |
 
 ### Modified MDM source (part of our contribution)
 | Path | Change |
@@ -37,10 +37,6 @@ our contribution is layered on top of the original MDM source.
 ### Upstream MDM source (unmodified, required to run)
 `data_loaders/ diffusion/ eval/ kit/ model/ prepare/ sample/ train/ utils/ visualize/`,
 plus `environment.yml`, `DiP.md`, and `LICENSE`.
-
-### Results
-`output_0608/` contains the saved baseline/guided motions (`comparison.npy`),
-per-run reports, and the poster figures (`fig1_skeleton.png` … `fig4_stride.png`).
 
 ---
 
@@ -59,8 +55,7 @@ Large weights are excluded by `.gitignore` and must be obtained separately:
    [official MDM release](https://github.com/GuyTevet/motion-diffusion-model).
    Point `MODEL_PATH` at its `model*.pt`.
 2. **Frozen motion→muscle proxy** — place `net_best_loss.pth` at
-   `motion2muscle/checkpoints/transformer_baseline_full/net_best_loss.pth`
-   (see that directory's `README.md` and `motion2muscle/HANDOFF.md`).
+   `motion2muscle/checkpoints/transformer_baseline_full/net_best_loss.pth`.
    Required only for `muscle` / `both` modes.
 
 You also need the standard MDM/HumanML3D dependencies (`glove/`, `t2m/`, body
@@ -96,19 +91,12 @@ python scripts/evaluate_muscle_space.py <output_root> \
     --muscle_posture anterior_pelvic_tilt --device cuda
 ```
 
-### 4. Diagnostics (muscle-pathway repair, Table 5)
+### 4. Figures
 ```bash
-python scripts/check_proxy_norm.py --muscle_ckpt <net_best_loss.pth>   # activation / Jacobian check
-python scripts/sanity_muscle_integration.py                            # loss-chain regression
-python scripts/probe_proxy_inversion.py ...                            # APT/PPT mapping cross-check
-```
-
-### 5. Figures
-```bash
-python scripts/gen_fig1.py both output_0608/n15/apt_both_seed42
-python scripts/gen_fig2.py output_0608/n15/apt_joint_seed42 output_0608/n15/apt_both_seed42 --labels Joint Both
-python scripts/gen_fig3.py output_0608/n15/apt_both_seed42
-python scripts/gen_fig4.py output_0608/n15/apt_both_seed42
+python scripts/gen_fig1.py both both <path_to_experiment_result>
+python scripts/gen_fig2.py <path_to_joint_result> <path_to_both_result> --labels Joint Both
+python scripts/gen_fig3.py <path_to_experiment_result>
+python scripts/gen_fig4.py <path_to_experiment_result>
 ```
 
 ---
@@ -126,11 +114,6 @@ python scripts/gen_fig4.py output_0608/n15/apt_both_seed42
 
 ---
 
-## Notes
-- `scripts/run_calibrated_ablation_v3.sh` is a development-time hyperparameter
-  sweep, **not** required for the reported results.
-- `README.md` (Chinese) is the original engineering hand-off log with the full
-  development history and per-posture findings.
 
 ## License & attribution
 The upstream MDM code is released under its original license (see `LICENSE`).
