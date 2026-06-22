@@ -3,15 +3,16 @@
 Generate Fig 3: APT-relevant muscle group activation change (horizontal bar chart).
 
 Usage:
-    python new/gen_fig3.py <data_dir> [--output <path>]
+    python scripts/gen_fig3.py <data_dir> [--output <path>]
 """
 import argparse, numpy as np, torch, matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from matplotlib.patches import Patch
 import sys, os
-sys.path.insert(0, '.')
-sys.path.insert(0, 'motion2muscle')
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, _ROOT)
+sys.path.insert(0, os.path.join(_ROOT, 'motion2muscle'))
 from muscle_guidance_mdm import build_muscle_guidance
 from muscle_rollup import get_indices
 

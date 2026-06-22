@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-new/verify_reference_vs_proxy.py
+scripts/verify_reference_vs_proxy.py
 
 一锤定音：把"方向反转"的两个候选病因分离开——
   (H_A) proxy 逆映射：proxy 把 APT 几何直接映射成 PPT 激活形态；
@@ -21,12 +21,12 @@ new/verify_reference_vs_proxy.py
         → H_ref（reference 污染）才是主因，换中性 reference 能修复。
 
 用法
-    python new/verify_reference_vs_proxy.py <comparison.npy 或其目录> \
+    python scripts/verify_reference_vs_proxy.py <comparison.npy 或其目录> \
         --muscle_ckpt motion2muscle/checkpoints/.../net_best_loss.pth \
         [--device cuda]
 
     # 同时传多个目录（如 joint / muscle / both 三个模式）逐个对比：
-    python new/verify_reference_vs_proxy.py ./output/apt_integrated_v2 --muscle_ckpt ...
+    python scripts/verify_reference_vs_proxy.py ./output/apt_integrated_v2 --muscle_ckpt ...
     （若传的是 output_root，会自动遍历其下每个含 comparison.npy 的子目录）
 """
 import argparse

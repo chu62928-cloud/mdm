@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# new/run_apt_integrated.sh
+# scripts/run_apt_integrated.sh
 # 骨盆前倾（APT）三模式对照：关节角 / 肌肉激活 / 两者组合。
 # 统一引导接口走 v2_dps（README 实测 APT 最佳：s=40 + last_quarter）。
 #
@@ -10,7 +10,7 @@
 #
 # 用法：
 #   MODEL_PATH=./save/.../model.pt MUSCLE_CKPT=./motion2muscle/checkpoints/.../net_best_loss.pth \
-#     bash new/run_apt_integrated.sh
+#     bash scripts/run_apt_integrated.sh
 set -euo pipefail
 
 MODEL_PATH="${MODEL_PATH:?请设置 MODEL_PATH 指向 MDM checkpoint}"
@@ -58,5 +58,5 @@ else
   echo "[skip] muscle / both：未设置 MUSCLE_CKPT"
 fi
 
-echo "完成。用 new/evaluate_ablation_v3.py 对各 output 目录评关节角指标，"
+echo "完成。用 scripts/evaluate_ablation_v3.py 对各 output 目录评关节角指标，"
 echo "对照 midterm Table 3/4 看肌肉 posture loss 方向。"

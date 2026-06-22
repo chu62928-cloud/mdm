@@ -3,14 +3,14 @@
 Generate Fig 2: APT angle curves (baseline vs guided) over time.
 
 Usage:
-    python new/gen_fig2.py <data_dir1> [data_dir2 ...] [--labels L1 L2 ...] [--output <path>]
-    python new/gen_fig2.py output_0608/n15/apt_joint_seed42 output_0608/n15/apt_both_seed42         --labels Joint Both --output output_0608/fig2.png
+    python scripts/gen_fig2.py <data_dir1> [data_dir2 ...] [--labels L1 L2 ...] [--output <path>]
+    python scripts/gen_fig2.py output_0608/n15/apt_joint_seed42 output_0608/n15/apt_both_seed42         --labels Joint Both --output output_0608/fig2.png
 """
 import argparse, numpy as np, math, matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import torch, sys, os
-sys.path.insert(0, '.')
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from posture_guidance.angle_ops import pelvis_tilt_angle
 from scipy.stats import pearsonr

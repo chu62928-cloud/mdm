@@ -1,5 +1,5 @@
 """
-new/sanity_muscle_integration.py
+scripts/sanity_muscle_integration.py
 
 自检：关节角 + 肌肉激活组合引导的"代码链路"是否正确。
 **不需要** MDM checkpoint，也**不需要**真实代理权重——用一个可微的 DummyProxy
@@ -9,10 +9,10 @@ new/sanity_muscle_integration.py
     3. CombinedGuidance：joint / muscle / both 三模式下梯度都能回到 motion(263)，
        且符号正确（关节最小化、肌肉最大化）
 
-端到端真实运行（带真权重）请用 new/run_apt_integrated.sh。
+端到端真实运行（带真权重）请用 scripts/run_apt_integrated.sh。
 
 用法：
-    python new/sanity_muscle_integration.py
+    python scripts/sanity_muscle_integration.py
 """
 import os
 import sys

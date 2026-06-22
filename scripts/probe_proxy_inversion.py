@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-new/probe_proxy_inversion.py
+scripts/probe_proxy_inversion.py
 
 坐实「冻结 motion→muscle proxy 对持续矢状骨盆倾角系统性逆映射」的成因，并产出论文证据图。
 
@@ -26,7 +26,7 @@ new/probe_proxy_inversion.py
 
 用法
 ----
-    python new/probe_proxy_inversion.py \
+    python scripts/probe_proxy_inversion.py \
         --joint_npy output_0608/apt_joint_seed42/comparison.npy \
         --muscle_ckpt motion2muscle/checkpoints/transformer_baseline_full/net_best_loss.pth \
         --data_dir dataset/HumanML3D \

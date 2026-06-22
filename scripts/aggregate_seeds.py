@@ -1,5 +1,5 @@
 """
-new/aggregate_seeds.py
+scripts/aggregate_seeds.py
 
 聚合多 seed 实验结果。输出两部分：
   1. 均值 ± 标准差表格（向后兼容）

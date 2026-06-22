@@ -3,16 +3,16 @@
 Generate Fig 1: sagittal skeleton comparison (baseline vs guided) for APT.
 
 Usage:
-    python new/gen_fig1.py <mode> <data_dir> [--output <path>] [--seed <int>]
-    python new/gen_fig1.py both output_0608/n15/apt_both_seed42 --output output_0608/fig1.png
-    python new/gen_fig1.py joint output_0608/n15/apt_joint_seed42
+    python scripts/gen_fig1.py <mode> <data_dir> [--output <path>] [--seed <int>]
+    python scripts/gen_fig1.py both output_0608/n15/apt_both_seed42 --output output_0608/fig1.png
+    python scripts/gen_fig1.py joint output_0608/n15/apt_joint_seed42
 """
 import argparse, numpy as np, math, matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from matplotlib.patches import Circle, Arc
 import torch, sys, os
-sys.path.insert(0, '.')
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from posture_guidance.angle_ops import pelvis_tilt_angle
 

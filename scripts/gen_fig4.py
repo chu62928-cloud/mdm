@@ -3,7 +3,7 @@
 Generate Fig 4: Stride analysis from ankle trajectory.
 
 Usage:
-    python new/gen_fig4.py <data_dir> [--output <path>]
+    python scripts/gen_fig4.py <data_dir> [--output <path>]
 """
 import argparse, numpy as np, matplotlib
 matplotlib.use('Agg')

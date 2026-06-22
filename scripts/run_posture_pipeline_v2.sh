@@ -5,9 +5,9 @@
 # Each invocation generates ONE sample (baseline + guided comparison).
 #
 # Usage:
-#   MODE=joint   POSTURE=anterior_pelvic_tilt SEED=42 bash new/run_posture_pipeline_v2.sh
-#   MODE=muscle  POSTURE=anterior_pelvic_tilt SEED=42 MUSCLE_CKPT=path/to/net_best_loss.pth bash new/run_posture_pipeline_v2.sh
-#   MODE=both    POSTURE=anterior_pelvic_tilt SEED=42 MUSCLE_CKPT=path/to/net_best_loss.pth bash new/run_posture_pipeline_v2.sh
+#   MODE=joint   POSTURE=anterior_pelvic_tilt SEED=42 bash scripts/run_posture_pipeline_v2.sh
+#   MODE=muscle  POSTURE=anterior_pelvic_tilt SEED=42 MUSCLE_CKPT=path/to/net_best_loss.pth bash scripts/run_posture_pipeline_v2.sh
+#   MODE=both    POSTURE=anterior_pelvic_tilt SEED=42 MUSCLE_CKPT=path/to/net_best_loss.pth bash scripts/run_posture_pipeline_v2.sh
 # =============================================================================
 
 set -e

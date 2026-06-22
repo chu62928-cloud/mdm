@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-new/evaluate_muscle_space.py
+scripts/evaluate_muscle_space.py
 
 肌肉空间评估（第二轮配套）。补上 evaluate_all_modes.py 缺的那一环：
 **真正把生成的运动喂进冻结代理，算肌肉激活层面的指标**，而不是只看骨盆角。
@@ -16,7 +16,7 @@ new/evaluate_muscle_space.py
   2. 各功能肌群 baseline→guided 平均激活 + 期望方向 ✓/✗ —— 复刻 midterm Table 4。
 
 用法：
-    python new/evaluate_muscle_space.py <output_root> \
+    python scripts/evaluate_muscle_space.py <output_root> \
         --muscle_ckpt motion2muscle/checkpoints/.../net_best_loss.pth \
         [--muscle_posture anterior_pelvic_tilt] [--device cuda]
 """

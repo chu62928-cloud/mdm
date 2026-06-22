@@ -1,5 +1,5 @@
 """
-new/evaluate_ablation.py  (v3, with two-sided hit_rate)
+scripts/evaluate_ablation.py  (v3, with two-sided hit_rate)
 
 核心变更：
     hit_rate 从单边 (>= target-tol) 改成区间 (target-tol, target+tol)。
