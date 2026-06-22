@@ -189,7 +189,7 @@ def register_posture(spec: LossSpec):
 register_posture(LossSpec(
     name="骨盆前倾",
     angle_fn=ops.pelvis_tilt_angle,           # 注意要用修复后的版本
-    target_deg=20.0,                          # 病态前倾 20°
+    target_deg=20.0,                          # 骨盆前倾
     direction="greater_than",
     tolerance_deg=2.0,
     phase="always",
@@ -263,8 +263,153 @@ register_posture(LossSpec(
     base_weight=15.0,
 ))
 
+
+# --- 膝超伸_dist（左）--- 有符号矢状面距离，无acos梯度饱和 ---
+register_posture(LossSpec(
+    name="膝超伸_dist_左",
+    angle_fn=ops.signed_knee_distance_sagittal,
+    angle_fn_kwargs={"side": "left"},
+    target_deg=-0.05,               # 约等效超伸 6°，负值=膝在后
+    direction="less_than",         # dist < target
+    tolerance_deg=0.01,             # 1cm 容许带
+    phase="always",
+    schedule="last_quarter",
+    base_weight=30.0,               # 距离量纲小，需更大 weight
+    unit="meter",                  # ★ 距离单位
+))
+
+# --- 膝超伸_dist（右）---
+register_posture(LossSpec(
+    name="膝超伸_dist_右",
+    angle_fn=ops.signed_knee_distance_sagittal,
+    angle_fn_kwargs={"side": "right"},
+    target_deg=-0.05,
+    direction="less_than",
+    tolerance_deg=0.01,
+    phase="always",
+    schedule="last_quarter",
+    base_weight=30.0,
+    unit="meter",
+))
+
+# --- 膝弯曲（左） --- 分布内，慢走常见，屈曲目标 125°
+register_posture(LossSpec(
+    name="膝弯曲_左",
+    angle_fn=ops.signed_knee_angle,
+    angle_fn_kwargs={"side": "left"},
+    target_deg=125.0,
+    direction="less_than",
+    tolerance_deg=2.0,
+    phase="stance_left",
+    schedule="last_quarter",
+    base_weight=15.0,
+    unit="deg",
+))
+
+# --- 膝弯曲（右） ---
+register_posture(LossSpec(
+    name="膝弯曲_右",
+    angle_fn=ops.signed_knee_angle,
+    angle_fn_kwargs={"side": "right"},
+    target_deg=125.0,
+    direction="less_than",
+    tolerance_deg=2.0,
+    phase="stance_right",
+    schedule="last_quarter",
+    base_weight=15.0,
+    unit="deg",
+))
+
 # --- 膝超伸（双侧别名，用户可以直接说"膝超伸"） ---
 # 在 controller 里展开成左右两个
+
+# --- 膝弯曲_A：target=145°，station 相位（轻度弯膝步态，分布内） ---
+# 正常站立相膝角 ~160-170°，145° 需要 Δ≈-15~25°，不触发相位反转
+register_posture(LossSpec(
+    name="膝弯曲_A_左",
+    angle_fn=ops.signed_knee_angle,
+    angle_fn_kwargs={"side": "left"},
+    target_deg=145.0,
+    direction="less_than",
+    tolerance_deg=2.0,
+    phase="stance_left",
+    schedule="last_quarter",
+    base_weight=15.0,
+    unit="deg",
+))
+
+register_posture(LossSpec(
+    name="膝弯曲_A_右",
+    angle_fn=ops.signed_knee_angle,
+    angle_fn_kwargs={"side": "right"},
+    target_deg=145.0,
+    direction="less_than",
+    tolerance_deg=2.0,
+    phase="stance_right",
+    schedule="last_quarter",
+    base_weight=15.0,
+    unit="deg",
+))
+
+# --- 膝弯曲_B：target=125°，phase=always（去掉相位门控） ---
+# 原 spec 的相位限制 stance_left/right 与 125° 形成相位-角度矛盾；
+# 改为 always 后 loss 在摆动相自然为 0（角度已 <125°），只在站立相有效
+register_posture(LossSpec(
+    name="膝弯曲_B_左",
+    angle_fn=ops.signed_knee_angle,
+    angle_fn_kwargs={"side": "left"},
+    target_deg=125.0,
+    direction="less_than",
+    tolerance_deg=2.0,
+    phase="always",
+    schedule="last_quarter",
+    base_weight=15.0,
+    unit="deg",
+))
+
+register_posture(LossSpec(
+    name="膝弯曲_B_右",
+    angle_fn=ops.signed_knee_angle,
+    angle_fn_kwargs={"side": "right"},
+    target_deg=125.0,
+    direction="less_than",
+    tolerance_deg=2.0,
+    phase="always",
+    schedule="last_quarter",
+    base_weight=15.0,
+    unit="deg",
+))
+
+# --- 躯干前倾（全身性前倾，髋中点→双肩中点矢状面夹角） ---
+# 正常快走约 5-10°，病理性前倾（Parkinson's、老年屈曲步态）约 15-30°
+# phase=always：全步态周期躯干均前倾，无相位冲突（不同于膝弯曲在站立相的相位-角度矛盾）
+register_posture(LossSpec(
+    name="躯干前倾",
+    angle_fn=ops.trunk_forward_lean,
+    target_deg=15.0,
+    direction="greater_than",
+    tolerance_deg=2.0,
+    phase="always",
+    schedule="last_quarter",
+    base_weight=20.0,
+    unit="deg",
+))
+
+# --- 骨盆侧倾（Trendelenburg 步态，右髋高） ---
+# 正常步态均值≈0°（双侧对称振荡）；病态 Trendelenburg 均值 > 3-5°（系统性单侧偏移）
+# 目标 5°：mild Trendelenburg，分布边界但仍在 MDM 训练集范围内
+# phase=always：全步态周期均需系统性偏移（不只在某一相）
+register_posture(LossSpec(
+    name="骨盆侧倾",
+    angle_fn=ops.pelvis_lateral_tilt,
+    target_deg=5.0,
+    direction="greater_than",
+    tolerance_deg=1.0,
+    phase="always",
+    schedule="last_quarter",
+    base_weight=20.0,
+    unit="deg",
+))
 
 # --- 驼背 ---
 register_posture(LossSpec(
@@ -297,9 +442,32 @@ register_posture(LossSpec(
 # 双侧别名展开
 # ============================================================
 
+# ---- 骨盆后倾 (PPT) ----
+register_posture(LossSpec(
+    name="骨盆后倾",
+    angle_fn=ops.pelvis_tilt_angle,
+    target_deg=-20.0,
+    direction="less_than",
+    tolerance_deg=2.0,
+    phase="always",
+    schedule="last_quarter",
+    base_weight=20.0,
+    companion_specs=[],
+))
+
 POSTURE_ALIASES = {
-    "膝超伸": ["膝超伸_左", "膝超伸_右"],
-    "脚不离地": ["脚不离地_左", "脚不离地_右"],
+    # English -> Chinese (joint+muscle unified): set POSTURE=english_name for both modules
+    "anterior_pelvic_tilt":  ["骨盆前倾"],
+    "posterior_pelvic_tilt": ["骨盆后倾"],
+    "forward_head_posture":  ["头前倾"],
+    "trendelenburg":         ["特伦德伦堡"],
+    # Chinese expansion aliases (knee/leg)
+    "膝盖超伸_dist": ["膝盖超伸_dist_左", "膝盖超伸_dist_右"],
+    "膝盖超伸":   ["膝盖超伸_左",   "膝盖超伸_右"],
+    "膝盖弯曲":   ["膝盖弯曲_左",   "膝盖弯曲_右"],
+    "膝盖弯曲_A": ["膝盖弯曲_A_左", "膝盖弯曲_A_右"],
+    "膝盖弯曲_B": ["膝盖弯曲_B_左", "膝盖弯曲_B_右"],
+    "骨盆侧倾": ["骨盆侧倾_左", "骨盆侧倾_右"],
 }
 
 

@@ -51,6 +51,7 @@ class ClosedLoopController:
         i_start_frac: float = 0.5,
         sigma_min: float = 0.01,
         sigma_max: float = 1.0,
+        use_time_decay: bool = True,
     ):
         # gains
         self.Kp = Kp
@@ -67,6 +68,8 @@ class ClosedLoopController:
         # sigma normalization range (for time-step-decay gain)
         self.sigma_min = sigma_min
         self.sigma_max = sigma_max
+        # c_t time-decay: if False, c_t=1.0 always (ablation use)
+        self.use_time_decay = use_time_decay
 
         self.state = PIDState()
 
@@ -99,11 +102,14 @@ class ClosedLoopController:
         # ---- 对策 A1: 时间步衰减增益 ----------------------------------------
         # σ_t 大 → c_t 小 → 弱控制；σ_t 小 → c_t 大 → 强校准
         # 早期 x0_hat 估计偏差大（Efron 2011），不该让闭环吃这些噪声
-        sigma_norm_range = max(self.sigma_max - self.sigma_min, 1e-6)
-        c_t = max(
-            0.0,
-            min(1.0, (self.sigma_max - float(sigma_t)) / sigma_norm_range),
-        )
+        if self.use_time_decay:
+            sigma_norm_range = max(self.sigma_max - self.sigma_min, 1e-6)
+            c_t = max(
+                0.0,
+                min(1.0, (self.sigma_max - float(sigma_t)) / sigma_norm_range),
+            )
+        else:
+            c_t = 1.0
 
         # ---- 对策 A2: anti-windup ------------------------------------------
         # (1) I 项启动延迟：t_int > T·i_start_frac 时不累积
