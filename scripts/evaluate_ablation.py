@@ -1,5 +1,5 @@
 """
-scripts/evaluate_ablation.py  (v3, with two-sided hit_rate)
+scripts/evaluate_ablation.py  (two-sided hit_rate)
 
 核心变更：
     hit_rate 从单边 (>= target-tol) 改成区间 (target-tol, target+tol)。
@@ -178,7 +178,7 @@ def classify_shape(m):
 
 def composite_score(m):
     """
-    v3 评分函数：
+    评分函数：
         硬约束（任一触发 → 0 分）：
             - hit_rate_loose < 0.05
             - corr < 0
@@ -262,7 +262,7 @@ def main():
     rows.sort(key=lambda r: r["score"], reverse=True)
 
     print("\n" + "=" * 140)
-    print(f"  Ablation v3 (区间 hit_rate + 过度推力惩罚) — {base.name}")
+    print(f"  Ablation (区间 hit_rate + 过度推力惩罚) — {base.name}")
     print(f"  Posture: {posture}")
     print("=" * 140)
 
@@ -303,11 +303,11 @@ def main():
     print("  ❌ jitter > 5°         : 剧烈抖动")
     print("  ❌ target_distance > 5°: 过度推力（平均角度距目标 >5°）")
 
-    out_json = base / "ablation_results_v3.json"
+    out_json = base / "ablation_results.json"
     json.dump(rows, open(out_json, "w"), indent=2, ensure_ascii=False)
     print(f"\n💾 Saved: {out_json}")
 
-    out_md = base / "ablation_results_v3.md"
+    out_md = base / "ablation_results.md"
     write_markdown_report(rows, posture, out_md)
     print(f"💾 Saved: {out_md}")
 

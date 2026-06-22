@@ -1,5 +1,5 @@
 """
-scripts/make_anatomical_animation_v3.py
+scripts/make_anatomical_animation.py
 
 修复内容：
     1. 脖子可见：头部圆不再遮住 neck，画一条明显的颈部线段

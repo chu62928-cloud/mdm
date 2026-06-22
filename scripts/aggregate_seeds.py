@@ -17,7 +17,7 @@ from pathlib import Path
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from scripts.evaluate_ablation_v3 import compute_metrics, classify_shape
+from scripts.evaluate_ablation import compute_metrics, classify_shape
 
 
 def bootstrap_ci(data, n_bootstrap=2000, ci=0.95):

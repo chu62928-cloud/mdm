@@ -58,5 +58,5 @@ else
   echo "[skip] muscle / both：未设置 MUSCLE_CKPT"
 fi
 
-echo "完成。用 scripts/evaluate_ablation_v3.py 对各 output 目录评关节角指标，"
+echo "完成。用 scripts/evaluate_ablation.py 对各 output 目录评关节角指标，"
 echo "对照 midterm Table 3/4 看肌肉 posture loss 方向。"

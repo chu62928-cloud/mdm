@@ -1,6 +1,6 @@
 # Training-Free Pathological Human Motion Generation via Dual Joint-Angle and Muscle-Activation Guidance
 
-Code release accompanying the paper/poster of the same title.
+Code release accompanying the paper of the same title.
 
 This repository steers a **frozen** text-to-motion diffusion model (MDM) toward
 clinically defined pathological postures (e.g., anterior pelvic tilt, APT) at
@@ -40,6 +40,39 @@ plus `environment.yml`, `DiP.md`, and `LICENSE`.
 
 ---
 
+## Results
+
+Headline numbers on the APT walking task (prompt *"a person is walking"*, target
+$\tau_{\text{APT}}=15°$, $w_M=22$), reported post-fix over $N=15$ random seeds.
+
+**Table 1 — APT in angle space** (band = $[13°, 17°]$). `joint` reaches the
+anterior target on every seed; `both` is the only mode with non-zero in-band
+precision and, among anterior-producing modes, the best temporal correlation;
+`muscle`-only moves posterior due to the proxy inversion (see below).
+
+| Mode | Guided APT | Δ | Hit (band / loose) | Corr | Shape |
+|---|---|---|---|---|---|
+| joint (single seed) | +15.5° | +22.5° | 88.3% / 100% | +0.53 | – |
+| joint | +19.5° | +30.4 ± 2.6° | 0% / 100% | +0.136 | 12 / 15 |
+| muscle | −16.5° | −5.6 ± 3.7° | 0% / 0% | +0.595 | 0 / 15 |
+| **both** | +18.6° | +28.1 ± 2.3° | **21.8 ± 12.2% / 91.8%** | +0.254 | 12 / 15 |
+
+**Table 2 — Muscle-space evaluation.** Directionality counts functional groups
+moving in the clinically expected APT direction (out of 20). The inflated
+`muscle` ratio is a denominator artifact (over-suppressed rectus abdominis), not
+genuine APT patterning; `both` is the practical operating point.
+
+| Mode | Clinical loss ratio | Direction (/20) |
+|---|---|---|
+| joint | 3 ± 1× | 6.1 ± 1.2 |
+| muscle | 622 ± 314× | 14.0 ± 1.7 |
+| both | 160 ± 178× | 9.8 ± 1.9 |
+
+The muscle pathway repair restores a usable guidance gradient
+(norm 0.0017 → 0.279). See the paper for the full analysis.
+
+---
+
 ## Setup
 
 ```bash
@@ -67,7 +100,7 @@ models) as described in the upstream MDM README.
 
 > Run all commands from the repository root. A GPU is required for generation.
 
-### 1. Three-mode comparison (Tables 1–3, Figs 1–4)
+### 1. Three-mode comparison (generates the motions behind Table 1)
 ```bash
 MODEL_PATH=./save/<mdm_ckpt>/model.pt \
 MUSCLE_CKPT=./motion2muscle/checkpoints/transformer_baseline_full/net_best_loss.pth \
@@ -78,13 +111,13 @@ the default unified interface `v2_dps`, `s=40`, `schedule=last_quarter` on the
 prompt *"a person is walking"*. Override `PROMPT`, `SEED`, `OUT_ROOT`, etc. via
 environment variables.
 
-### 2. Joint-space evaluation
+### 2. Joint-space evaluation (Table 1)
 ```bash
-python scripts/evaluate_ablation_v3.py <output_dir>     # per-run joint-angle metrics
+python scripts/evaluate_ablation.py <output_dir>     # per-run joint-angle metrics
 python -m scripts.aggregate_seeds <output_dir_1> <output_dir_2> ...  # multi-seed aggregation
 ```
 
-### 3. Muscle-space evaluation (offline, no re-generation)
+### 3. Muscle-space evaluation (Table 2; offline, no re-generation)
 ```bash
 python scripts/evaluate_muscle_space.py <output_root> \
     --muscle_ckpt motion2muscle/checkpoints/transformer_baseline_full/net_best_loss.pth \
@@ -92,11 +125,19 @@ python scripts/evaluate_muscle_space.py <output_root> \
 ```
 
 ### 4. Figures
+The paper's **Figure 1** is a framework schematic (not script-generated).
+**Figure 2** (qualitative angle) and **Figure 3** (muscle-space + emergent stride)
+are assembled from the panels below; `<dir>` is an experiment directory containing
+a `comparison.npy`, e.g. `output_0608/n15/apt_both_seed42`.
+
 ```bash
-python scripts/gen_fig1.py both both <path_to_experiment_result>
-python scripts/gen_fig2.py <path_to_joint_result> <path_to_both_result> --labels Joint Both
-python scripts/gen_fig3.py <path_to_experiment_result>
-python scripts/gen_fig4.py <path_to_experiment_result>
+# Figure 2 — sagittal key-frames + per-frame APT trajectories
+python scripts/gen_fig1.py <both_dir>                                 # skeleton key-frames
+python scripts/gen_fig2.py <joint_dir> <both_dir> --labels Joint Both # APT angle curves
+
+# Figure 3 — muscle-group activation change + emergent stride
+python scripts/gen_fig3.py <both_dir>                                 # APT-relevant muscle bars
+python scripts/gen_fig4.py <both_dir>                                 # stride / gait-phase
 ```
 
 ---

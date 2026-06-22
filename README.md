@@ -15,7 +15,7 @@
 | 老版主张 | 实际情况 |
 |---|---|
 | 🔴 "fk_fn 实现错误，build_fk_fn 切片归一化值没反归一化" | `posture_guidance/mdm_integration.py:13-58` 的 `make_fk_fn` **完全正确**：`mu_perm * std_d + mean_d` 反归一化后调用 `recover_from_ric`，梯度链完整。老版描述的 `build_fk_fn` **不存在**于 GitHub 代码中。 |
-| 🟡 "v3 score 不看 corr，塌平也能得高分" | `new/evaluate_ablation_v3.py:152-174` 的 `composite_score` **已经**把 corr 放进分子，对塌平（hit_loose>0.9 & corr<0.15）、负 corr、过推、抖动都设了硬约束→0。 |
+| 🟡 "v3 score 不看 corr，塌平也能得高分" | `scripts/evaluate_ablation.py` 的 `composite_score` **已经**把 corr 放进分子，对塌平（hit_loose>0.9 & corr<0.15）、负 corr、过推、抖动都设了硬约束→0。 |
 
 **结论**：fk_fn 不用动，score_v3 也不用大改。真正的瓶颈在跨 seed 稳定性和**任务表征性**，下面详述。
 
@@ -56,7 +56,7 @@ motion-diffusion-model/
 │   └── closed_loop_controller.py      ← V6 用的 PID 控制器 + orthogonal_project
 │
 ├── new/                               ← 实验脚本层
-│   ├── evaluate_ablation_v3.py        ← 单 sweep 评分 + shape 分类
+│   ├── evaluate_ablation.py           ← 单 sweep 评分 + shape 分类
 │   ├── aggregate_seeds.py             ← 跨 seed 聚合
 │   ├── run_cross_posture.sh           ← 跨体态 wrapper
 │   ├── analyze_knee_angles.py         ← 训练集三点角分布

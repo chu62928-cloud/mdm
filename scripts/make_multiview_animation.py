@@ -1,5 +1,5 @@
 """
-scripts/make_multiview_animation_v2.py
+scripts/make_multiview_animation.py
 
 论文风格的多视角动画：
     - 无关节圆点

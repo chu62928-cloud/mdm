@@ -3,9 +3,9 @@
 Generate Fig 1: sagittal skeleton comparison (baseline vs guided) for APT.
 
 Usage:
-    python scripts/gen_fig1.py <mode> <data_dir> [--output <path>] [--seed <int>]
-    python scripts/gen_fig1.py both output_0608/n15/apt_both_seed42 --output output_0608/fig1.png
-    python scripts/gen_fig1.py joint output_0608/n15/apt_joint_seed42
+    python scripts/gen_fig1.py <data_dir> [--output <path>] [--frame <int>]
+    python scripts/gen_fig1.py output_0608/n15/apt_both_seed42 --output output_0608/fig1.png
+    python scripts/gen_fig1.py output_0608/n15/apt_joint_seed42
 """
 import argparse, numpy as np, math, matplotlib
 matplotlib.use('Agg')
