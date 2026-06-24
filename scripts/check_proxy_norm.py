@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-new/check_proxy_norm.py
+scripts/check_proxy_norm.py
 
 诊断 proxy 的"输出退化 + Jacobian 极小"问题，定位是 (1) 多余的最终 sigmoid，
 还是 (2) 归一化握手，还是 (3) proxy 本身迟钝。
@@ -11,7 +11,7 @@ new/check_proxy_norm.py
   - 输入→输出 Jacobian 范数 ‖∂ mean(act) / ∂ motion‖（越大越灵敏）
 
 用法：
-    python new/check_proxy_norm.py --muscle_ckpt <net_best_loss.pth> \
+    python scripts/check_proxy_norm.py --muscle_ckpt <net_best_loss.pth> \
         [--comparison output/.../comparison.npy] [--device cuda] \
         [--orig_module /root/autodl-tmp/motion2muscle/models/m2m_transformer.py \
          --orig_class MotionToMuscleModel]

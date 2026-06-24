@@ -1,5 +1,5 @@
 """
-new/analyze_pelvis_tilt.py
+scripts/analyze_pelvis_tilt.py
 
 骨盆前倾角分布统计：扫描 HumanML3D 训练集，提取行走/站立帧的骨盆倾斜角分布。
 

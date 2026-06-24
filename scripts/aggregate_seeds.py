@@ -1,5 +1,5 @@
 """
-new/aggregate_seeds.py
+scripts/aggregate_seeds.py
 
 聚合多 seed 实验结果。输出两部分：
   1. 均值 ± 标准差表格（向后兼容）
@@ -17,7 +17,7 @@ from pathlib import Path
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from scripts.evaluate_ablation_v3 import compute_metrics, classify_shape
+from scripts.evaluate_ablation import compute_metrics, classify_shape
 
 
 def bootstrap_ci(data, n_bootstrap=2000, ci=0.95):
