@@ -482,3 +482,16 @@ def resolve_instruction(instruction: str) -> list[str]:
         f"Available: {list(POSTURE_REGISTRY.keys())} "
         f"+ aliases {list(POSTURE_ALIASES.keys())}"
     )
+# ---- Auto-calibration APT targets (5-25 deg) ----
+for _tau in [5, 10, 15, 25]:
+    register_posture(LossSpec(
+        name=f'anterior_pelvic_tilt_tau{_tau:02d}',
+        angle_fn=ops.pelvis_tilt_angle,
+        target_deg=float(_tau),
+        direction='greater_than',
+        tolerance_deg=2.0,
+        phase='always',
+        schedule='last_quarter',
+        base_weight=20.0,
+        companion_specs=[],
+    ))
