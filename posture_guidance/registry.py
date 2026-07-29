@@ -36,6 +36,8 @@ class LossSpec:
     base_weight: float = 1.0                 # 该 loss 的基准权重
     unit: str = "deg"                        # deg | meter
     companion_specs: list = field(default_factory=list)  # 连带约束
+    is_primary: bool = False                # True for the single V7 constraint
+    control_type: str = "equality"        # equality | lower_bound | upper_bound
 
 
 # ============================================================
@@ -196,6 +198,8 @@ register_posture(LossSpec(
     schedule="last_quarter",                         # ← 改：用衰减调度，前期不施压
     base_weight=20.0,                          # ← 改：从 1.0 降到 0.3
     companion_specs=[],
+    is_primary=True,
+    control_type="equality",
 ))
 
 register_posture(LossSpec(
@@ -494,4 +498,6 @@ for _tau in [5, 10, 15, 25]:
         schedule='last_quarter',
         base_weight=20.0,
         companion_specs=[],
+        is_primary=True,
+        control_type="equality",
     ))

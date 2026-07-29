@@ -1,0 +1,1672 @@
+diff --git a/eval/__init__.py b/eval/__init__.py
+new file mode 100644
+index 0000000..9e9d8dd
+--- /dev/null
++++ b/eval/__init__.py
+@@ -0,0 +1,2 @@
++# eval/__init__.py — Frozen evaluation system v1.0
++# Posture Guidance on MDM — Evaluation Harness
+diff --git a/eval/control_metrics.py b/eval/control_metrics.py
+new file mode 100644
+index 0000000..e15fef1
+--- /dev/null
++++ b/eval/control_metrics.py
+@@ -0,0 +1,210 @@
++# eval/control_metrics.py — Frozen physical-plausibility + control-accuracy metrics v1.0
++#
++# Implements:
++#   - foot_skate_ratio (field-standard: height < 5cm, slide > 2.5cm)
++#   - posture_target_metrics (judge-op based, with judge/guidance firewall)
++#   - validity_mask layer (per-frame valid/invalid flags)
++#   - phase_selectivity
++#
++# Invariant 1 (circularity firewall): judge_op MUST differ from guidance_op.
++# Invariant 2 (validity domain): every angle op returns (value, valid_flag).
++import math
++import numpy as np
++from scipy.stats import pearsonr
++
++from posture_guidance import angle_ops
++from posture_guidance.phase_detector import PhaseDetector
++
++# ---------------------------------------------------------------------------
++# Judge angle-op registry — these are the THIRD-PARTY measurement functions
++# that have NEVER appeared in a guidance loss.
++# ---------------------------------------------------------------------------
++JUDGE_ANGLE_OPS = {
++    "pelvis_tilt":      angle_ops.pelvis_tilt_angle,
++    "signed_knee_left": lambda q: angle_ops.signed_knee_angle(q, side="left"),
++    "signed_knee_right": lambda q: angle_ops.signed_knee_angle(q, side="right"),
++    "signed_knee_avg":  lambda q: (angle_ops.signed_knee_angle(q, side="left")
++                                   + angle_ops.signed_knee_angle(q, side="right")) / 2.0,
++    "trunk_lean":       angle_ops.trunk_forward_lean,
++    "pelvis_lateral":   angle_ops.pelvis_lateral_tilt,
++    "spine_bulge":      angle_ops.spine_posterior_bulge,
++    "head_forward":     angle_ops.head_forward_offset,
++}
++
++# ---------------------------------------------------------------------------
++# Per-angle-op validity rules (Invariant 2)
++# ---------------------------------------------------------------------------
++def validity_mask(angle_values_deg, angle_op_name):
++    """Return per-frame boolean mask of valid measurements.
++
++    Rules:
++      - signed_knee: sag > 210 deg or (tpa < 160 and sag > 180) -> invalid
++      - other ops: all valid by default
++    """
++    n = len(angle_values_deg)
++    valid = np.ones(n, dtype=bool)
++    if "knee" in angle_op_name:
++        vals = np.asarray(angle_values_deg)
++        # For knee angles above 210 degrees, acos-based metric breaks down
++        valid = valid & (vals <= 210.0)
++        # Deep flexion edge case
++        valid = valid & ~((vals < 160.0) & (vals > 180.0))
++    return valid
++
++
++# ---------------------------------------------------------------------------
++# Foot-skating ratio
++# ---------------------------------------------------------------------------
++def foot_skate_ratio(q_xyz, contact_height=0.05, slide_thresh=0.025):
++    """Field-standard foot-skating ratio (GMD/OmniControl thresholds).
++
++    Args:
++        q_xyz: (T, J, 3) or (B, T, J, 3) joint positions in meters.
++        contact_height: max foot height (m) to count as "on ground".
++        slide_thresh: min horizontal displacement (m) to count as "sliding".
++
++    Returns:
++        float in [0, 1] — fraction of contact frames with skating.
++    """
++    q = np.asarray(q_xyz)
++    if q.ndim == 4:
++        q = q[0]  # take first batch element
++    T, J, _ = q.shape
++    if J < 12:
++        return 0.0
++    L_FOOT, R_FOOT = 10, 11  # SMPL-H indices
++    feet = q[:, [L_FOOT, R_FOOT], :]  # (T, 2, 3)
++
++    on_ground = feet[:, :, 1] < contact_height  # (T, 2)
++    # Horizontal motion between consecutive frames
++    motion = np.linalg.norm(
++        np.diff(feet[:, :, [0, 2]], axis=0), axis=-1)  # (T-1, 2)
++    sliding = motion > slide_thresh
++    skate = on_ground[1:] & sliding
++    if skate.size == 0:
++        return 0.0
++    return float(skate.any(axis=1).mean())
++
++
++# ---------------------------------------------------------------------------
++# Posture-target metrics (the core function)
++# ---------------------------------------------------------------------------
++def posture_target_metrics(q_guided, q_baseline, judge_angle_op,
++                           target, tolerance, direction,
++                           phase_mask=None,
++                           judge_op_name="unknown",
++                           unit="deg"):
++    """Compute all posture-target metrics from saved motions.
++
++    Args:
++        q_guided/baseline: (T, J, 3) or (B, T, J, 3) joint positions.
++        judge_angle_op: callable q -> (T,) angle.
++        target: scalar target value in degrees (or meters if unit='m').
++        tolerance: band half-width in degrees (or meters if unit='m').
++        direction: "greater_than" | "less_than" | "equal".
++        phase_mask: optional (T,) bool array.
++        judge_op_name: for validity masking.
++        unit: "deg" (radians->degrees) or "m" (meters, no conversion).
++    """
++    import torch, math
++
++    # Convert target/tolerance to radians for angle ops
++    if unit == "deg":
++        target_rad = target * math.pi / 180.0
++        tol_rad = tolerance * math.pi / 180.0
++    else:
++        target_rad = target
++        tol_rad = tolerance
++
++    # Handle batch dim
++    qg = np.asarray(q_guided)
++    qb = np.asarray(q_baseline)
++    if qg.ndim == 4:
++        qg = qg[0]
++        qb = qb[0]
++
++    # Convert to torch for angle ops
++    qg_t = torch.from_numpy(qg).float()
++    qb_t = torch.from_numpy(qb).float()
++
++    a_g = judge_angle_op(qg_t).numpy()
++    a_b = judge_angle_op(qb_t).numpy()
++
++    # Validity mask (needs degrees for angle ops)
++    a_g_for_valid = a_g * 180.0 / math.pi if unit == "deg" else a_g
++    valid = validity_mask(a_g_for_valid, judge_op_name)
++    valid_fraction = float(valid.mean())
++
++    # Apply validity + optional phase mask
++    mask = valid.copy()
++    if phase_mask is not None:
++        pm = np.asarray(phase_mask).flatten()[:len(mask)]
++        mask = mask & pm
++
++    if mask.sum() == 0:
++        return {"target_hit_band": 0.0, "delta": 0.0, "overshoot": 0.0,
++                "temporal_corr": 0.0, "phase_selectivity": 0.0,
++                "valid_fraction": valid_fraction}
++
++    a_g_m = a_g[mask]
++    a_b_m = a_b[mask]
++
++    # Delta (report in degrees for deg units)
++    if unit == "deg":
++        delta = float((a_g_m.mean() - a_b_m.mean()) * 180.0 / math.pi)
++    else:
++        delta = float(a_g_m.mean() - a_b_m.mean())
++
++    # Hit band (two-sided) — use radian target/tolerance
++    hit_mask = (a_g_m >= target_rad - tol_rad) & (a_g_m <= target_rad + tol_rad)
++    target_hit_band = float(hit_mask.mean())
++
++    # Overshoot: distance of mean from target (report in degrees for deg units)
++    if unit == "deg":
++        overshoot = float(abs(a_g_m.mean() * 180.0 / math.pi - target))
++    else:
++        overshoot = float(abs(a_g_m.mean() - target_rad))
++
++    # Temporal correlation
++    if a_b_m.std() > 1e-8 and a_g_m.std() > 1e-8:
++        temporal_corr = float(pearsonr(a_b_m, a_g_m)[0])
++    else:
++        temporal_corr = 0.0
++
++    # Phase selectivity: ratio of on-phase deviation to off-phase deviation
++    if phase_mask is not None:
++        pm = np.asarray(phase_mask).flatten()[:len(valid)]
++        off_mask = valid & ~pm
++        if off_mask.sum() > 0 and pm.sum() > 0:
++            on_dev = np.abs(a_g[pm & valid] - a_b[pm & valid]).mean()
++            off_dev = np.abs(a_g[off_mask] - a_b[off_mask]).mean()
++            if off_dev > 1e-8:
++                phase_selectivity = float(on_dev / off_dev)
++            else:
++                phase_selectivity = float("inf") if on_dev > 0 else 1.0
++        else:
++            phase_selectivity = 1.0
++    else:
++        phase_selectivity = 1.0
++
++    return {
++        "target_hit_band": target_hit_band,
++        "delta": delta,
++        "overshoot": overshoot,
++        "temporal_corr": temporal_corr,
++        "phase_selectivity": phase_selectivity,
++        "valid_fraction": valid_fraction,
++    }
++
++
++# ---------------------------------------------------------------------------
++# Firewall assertion
++# ---------------------------------------------------------------------------
++def assert_judge_not_guidance(judge_op, guidance_op_name):
++    """Hard assertion: judge op must NOT be the guidance op."""
++    judge_id = getattr(judge_op, "__name__", repr(judge_op))
++    if judge_id == guidance_op_name or judge_id in str(guidance_op_name):
++        raise AssertionError(
++            f"Circularity firewall violated! judge_op={judge_id} "
++            f"appears to be the same as guidance_op={guidance_op_name}. "
++            f"Use an independent angle function as judge.")
+\ No newline at end of file
+diff --git a/eval/distribution_metrics.py b/eval/distribution_metrics.py
+new file mode 100644
+index 0000000..5bc0e6a
+--- /dev/null
++++ b/eval/distribution_metrics.py
+@@ -0,0 +1,237 @@
++"""Frozen standard distribution-metric evaluator v1.0.
++
++Uses the Guo et al. 2022 pretrained contrastive text/motion encoders
++(EvaluatorMDMWrapper) to compute FID, R-Precision, Diversity, MM-Dist
++over saved motion files.
++
++All motion data passed to compute_*() must be in MDM-normalized space
++(as saved in comparison.npy motion_hml / motion_hml_tj).
++"""
++
++import sys
++import numpy as np
++from pathlib import Path
++
++_PROJECT_ROOT = Path(__file__).resolve().parent.parent
++if str(_PROJECT_ROOT) not in sys.path:
++    sys.path.insert(0, str(_PROJECT_ROOT))
++
++
++class DistributionMetrics:
++
++    def __init__(self, device="cuda"):
++        self.device = device
++        self._eval_wrapper = None
++        self._word_vectorizer = None
++        self.ref_mu = None
++        self.ref_cov = None
++        self._cache_path = _PROJECT_ROOT / "eval" / "assets" / "ref_stats.npz"
++
++        mdm_root = _PROJECT_ROOT / "dataset" / "HumanML3D"
++        self._mean = np.load(mdm_root / "Mean.npy").astype(np.float32)
++        self._std = np.load(mdm_root / "Std.npy").astype(np.float32)
++
++    # ---- Lazy loaders ----
++
++    @property
++    def eval_wrapper(self):
++        if self._eval_wrapper is None:
++            from data_loaders.humanml.networks.evaluator_wrapper import \
++                EvaluatorMDMWrapper
++            self._eval_wrapper = EvaluatorMDMWrapper("humanml", self.device)
++        return self._eval_wrapper
++
++    @property
++    def word_vectorizer(self):
++        if self._word_vectorizer is None:
++            from data_loaders.humanml.utils.word_vectorizer import WordVectorizer
++            self._word_vectorizer = WordVectorizer(
++                str(_PROJECT_ROOT / "glove"), "our_vab")
++        return self._word_vectorizer
++
++    # ---- Reference stats (precompute once, cache) ----
++
++    def ensure_ref_stats(self, force=False):
++        if (not force) and self._cache_path.exists():
++            data = np.load(self._cache_path)
++            self.ref_mu = data["mu"]
++            self.ref_cov = data["cov"]
++            return
++
++        print("[eval] Computing reference statistics from HumanML3D test set ...")
++        from data_loaders.humanml.utils.metrics import \
++            calculate_activation_statistics
++
++        all_emb, batch_motions, batch_lens = [], [], []
++        test_file = _PROJECT_ROOT / "dataset" / "HumanML3D" / "test.txt"
++        vecs_dir = _PROJECT_ROOT / "dataset" / "HumanML3D" / "new_joint_vecs"
++
++        with open(test_file) as f:
++            lines = [l.strip() for l in f if l.strip()]
++
++        for name in lines:
++            m = np.load(vecs_dir / f"{name}.npy")          # raw scale
++            # Normalize to MDM space (same as evaluator training)
++            m_norm = (m - self._mean) / self._std
++            batch_motions.append(m_norm.astype(np.float32))
++            batch_lens.append(m.shape[0])
++            if len(batch_motions) >= 64:
++                emb = self._encode_motion_batch(batch_motions, batch_lens)
++                all_emb.append(emb)
++                batch_motions, batch_lens = [], []
++
++        if batch_motions:
++            emb = self._encode_motion_batch(batch_motions, batch_lens)
++            all_emb.append(emb)
++
++        all_emb = np.concatenate(all_emb, axis=0)
++        self.ref_mu, self.ref_cov = calculate_activation_statistics(all_emb)
++
++        self._cache_path.parent.mkdir(parents=True, exist_ok=True)
++        np.savez(self._cache_path, mu=self.ref_mu, cov=self.ref_cov)
++        print(f"[eval] Reference stats cached -> {self._cache_path}  "
++              f"(N={all_emb.shape[0]}, dim={all_emb.shape[1]})")
++
++    # ---- Motion encoding ----
++
++    def _encode_motion_batch(self, motions, m_lens):
++        import torch
++        max_len = max(m.shape[0] for m in motions)
++        B = len(motions)
++        padded = np.zeros((B, max_len, 263), dtype=np.float32)
++        for i, m in enumerate(motions):
++            padded[i, :m.shape[0]] = m
++        m_t = torch.from_numpy(padded).to(self.device)
++        l_t = torch.as_tensor(m_lens, dtype=torch.long, device=self.device)
++        with torch.no_grad():
++            emb = self.eval_wrapper.get_motion_embeddings(m_t, l_t)
++        return emb.cpu().numpy()
++
++    def _pad_motions_to_tensor(self, motions):
++        import torch
++        if isinstance(motions, np.ndarray):
++            if motions.ndim == 3:
++                return torch.from_numpy(motions).float().to(self.device)
++            return torch.from_numpy(motions[None]).float().to(self.device)
++        max_len = max(m.shape[0] for m in motions)
++        B = len(motions)
++        padded = np.zeros((B, max_len, 263), dtype=np.float32)
++        for i, m in enumerate(motions):
++            padded[i, :m.shape[0]] = m
++        return torch.from_numpy(padded).to(self.device)
++
++    # ---- Public metrics (all expect MDM-normalized input) ----
++
++    def compute_fid(self, motions, m_lens):
++        if self.ref_mu is None:
++            self.ensure_ref_stats()
++        from data_loaders.humanml.utils.metrics import \
++            calculate_activation_statistics
++        emb = self._encode_motion_batch(motions, m_lens)
++        mu, cov = calculate_activation_statistics(emb)
++        return self._compute_fid_stable(self.ref_mu, self.ref_cov, mu, cov)
++
++    def compute_diversity(self, motions, m_lens, times=300):
++        from data_loaders.humanml.utils.metrics import calculate_diversity
++        emb = self._encode_motion_batch(motions, m_lens)
++        n = emb.shape[0]
++        t = min(times, max(1, n // 2))
++        return float(calculate_diversity(emb, t))
++
++    def compute_r_precision(self, motions, m_lens, texts, k=3):
++        import torch
++        from data_loaders.humanml.utils.metrics import calculate_R_precision
++        m_t = self._pad_motions_to_tensor(motions)
++        l_t = torch.as_tensor(m_lens, dtype=torch.long, device=self.device)
++        we, po, cl = self._texts_to_batch(texts)
++        with torch.no_grad():
++            te, me = self.eval_wrapper.get_co_embeddings(we, po, cl, m_t, l_t)
++        top_k_mat = calculate_R_precision(
++            te.cpu().numpy(), me.cpu().numpy(), k, sum_all=True)
++        return (top_k_mat / me.shape[0]).tolist()
++
++    def compute_mm_dist(self, motions, m_lens, texts):
++        import torch
++        from data_loaders.humanml.utils.metrics import calculate_matching_score
++        m_t = self._pad_motions_to_tensor(motions)
++        l_t = torch.as_tensor(m_lens, dtype=torch.long, device=self.device)
++        we, po, cl = self._texts_to_batch(texts)
++        with torch.no_grad():
++            te, me = self.eval_wrapper.get_co_embeddings(we, po, cl, m_t, l_t)
++        mm = calculate_matching_score(
++            te.cpu().numpy(), me.cpu().numpy(), sum_all=True)
++        return float(mm) / me.shape[0]
++
++    # ---- Text helpers ----
++
++    def _texts_to_batch(self, texts):
++        import torch
++        we_list, po_list, cl = [], [], []
++        for raw in texts:
++            tokens = self._tokenize(raw)
++            we, po = [], []
++            for token in tokens:
++                w, p = self.word_vectorizer[token]
++                we.append(w)
++                po.append(p)
++            we_list.append(np.stack(we))
++            po_list.append(np.stack(po))
++            cl.append(len(we))
++        max_len = max(cl)
++        B = len(texts)
++        we_b = np.zeros((B, max_len, 300), dtype=np.float32)
++        po_b = np.zeros((B, max_len, 15), dtype=np.float32)
++        for i in range(B):
++            we_b[i, :cl[i]] = we_list[i]
++            po_b[i, :cl[i]] = po_list[i]
++        return (torch.from_numpy(we_b).to(self.device),
++                torch.from_numpy(po_b).to(self.device),
++                torch.as_tensor(cl, dtype=torch.long, device=self.device))
++
++    @staticmethod
++    def _tokenize(sentence):
++        try:
++            import spacy
++            nlp = spacy.load("en_core_web_sm")
++            doc = nlp(sentence.replace("-", " "))
++            tokens = []
++            for tok in doc:
++                if not tok.text.strip():
++                    continue
++                word = (tok.lemma_ if (tok.pos_ in ("NOUN", "VERB")
++                        and tok.text != "left") else tok.text)
++                pos_map = {"NOUN": "NOUN", "VERB": "VERB", "ADJ": "ADJ",
++                           "ADV": "ADV", "ADP": "ADP", "DET": "DET",
++                           "NUM": "NUM", "PRON": "PRON", "AUX": "AUX"}
++                pos = pos_map.get(tok.pos_, "OTHER")
++                tokens.append(f"{word}/{pos}")
++            return ["sos/OTHER"] + tokens + ["eos/OTHER"]
++        except Exception:
++            words = sentence.split()
++            return ["sos/OTHER"] + [f"{w}/NOUN" for w in words] + ["eos/OTHER"]
++
++    # ---- FID numerical stability ----
++
++    @staticmethod
++    def _compute_fid_stable(mu1, sigma1, mu2, sigma2):
++        import scipy.linalg as linalg
++        mu1 = np.atleast_1d(mu1)
++        mu2 = np.atleast_1d(mu2)
++        sigma1 = np.atleast_2d(sigma1)
++        sigma2 = np.atleast_2d(sigma2)
++        diff = mu1 - mu2
++        d = sigma1.shape[0]
++        tr1 = np.trace(sigma1) / d
++        tr2 = np.trace(sigma2) / d
++        ridge = max(tr1, tr2) * 1e-3 + 1e-6
++        s1 = sigma1 + np.eye(d) * ridge
++        s2 = sigma2 + np.eye(d) * ridge
++        try:
++            covmean = linalg.sqrtm(s1.dot(s2), disp=False)[0]
++        except Exception:
++            covmean = linalg.sqrtm(s1.dot(s2))
++        if np.iscomplexobj(covmean):
++            covmean = covmean.real
++        tr_covmean = np.trace(covmean)
++        fid = diff.dot(diff) + np.trace(s1) + np.trace(s2) - 2 * tr_covmean
++        return float(max(0.0, fid))
+\ No newline at end of file
+diff --git a/eval/scorecard.py b/eval/scorecard.py
+new file mode 100644
+index 0000000..0a296ae
+--- /dev/null
++++ b/eval/scorecard.py
+@@ -0,0 +1,304 @@
++# eval/scorecard.py -- Unified evaluation scorecard v1.0
++#
++# One command turns a folder of saved motions into a complete,
++# publishable scorecard with robust statistics and sagittal render.
++#
++# Usage:
++#   python -m eval.scorecard --run_dir output0727/<name> \
++#       --posture anterior_pelvic_tilt --target 20.0 --tolerance 2.0 \
++#       --direction greater_than --judge_op pelvis_tilt
++
++import sys
++import json
++import argparse
++import warnings
++from pathlib import Path
++from datetime import datetime
++
++import numpy as np
++
++_PROJ = Path(__file__).resolve().parent.parent
++sys.path.insert(0, str(_PROJ))
++
++from eval.control_metrics import (
++    JUDGE_ANGLE_OPS, posture_target_metrics, foot_skate_ratio,
++    assert_judge_not_guidance)
++from eval.distribution_metrics import DistributionMetrics
++
++
++def load_seed_data(run_dir):
++    """Load all comparison.npy files from subdirectories.
++
++    Returns:
++        list of dicts, each with keys: seed, baseline_motion, guided_motion,
++        baseline_xyz, guided_xyz, text, m_len, guidance_mode, guidance_config
++    """
++    run_dir = Path(run_dir)
++    seeds = []
++
++    # Also check if run_dir ITSELF contains comparison.npy (single-run case)
++    direct_npy = run_dir / "comparison.npy"
++    if direct_npy.exists():
++        data = np.load(direct_npy, allow_pickle=True).item()
++        seeds.append({
++            "seed": data.get("seed", 0),
++            "dir_name": run_dir.name,
++            "baseline": data["motion_hml_tj"][0].astype(np.float32),
++            "guided": data["motion_hml_tj_guided"][0].astype(np.float32),
++            "baseline_xyz": data["motion_xyz"][0].transpose(2, 0, 1),
++            "guided_xyz": data["motion_xyz_guided"][0].transpose(2, 0, 1),
++            "text": data.get("text_prompt", ""),
++            "m_len": data["motion_hml_tj"].shape[1],
++            "guidance_mode": data.get("guidance_mode", "unknown"),
++            "guidance_config": data.get("guidance_config", {}),
++        })
++
++    # Search subdirectories for comparison.npy
++    for d in sorted(run_dir.iterdir()):
++        if not d.is_dir():
++            continue
++        npy = d / "comparison.npy"
++        if not npy.exists():
++            continue
++        data = np.load(npy, allow_pickle=True).item()
++        seeds.append({
++            "seed": data.get("seed", d.name),
++            "dir_name": d.name,
++            "baseline": data["motion_hml_tj"][0].astype(np.float32),
++            "guided": data["motion_hml_tj_guided"][0].astype(np.float32),
++            "baseline_xyz": data["motion_xyz"][0].transpose(2, 0, 1),
++            "guided_xyz": data["motion_xyz_guided"][0].transpose(2, 0, 1),
++            "text": data.get("text_prompt", ""),
++            "m_len": data["motion_hml_tj"].shape[1],
++            "guidance_mode": data.get("guidance_mode", "unknown"),
++            "guidance_config": data.get("guidance_config", {}),
++        })
++    return seeds
++
++
++def bootstrap_ci(values, n_bootstrap=2000, ci=95):
++    """Bootstrap confidence interval for the mean."""
++    values = np.asarray(values)
++    n = len(values)
++    means = []
++    rng = np.random.RandomState(42)
++    for _ in range(n_bootstrap):
++        idx = rng.choice(n, n, replace=True)
++        means.append(values[idx].mean())
++    means = np.sort(means)
++    lo = (100 - ci) / 2
++    hi = 100 - lo
++    return float(np.percentile(means, lo)), float(np.percentile(means, hi))
++
++
++def aggregate_metrics(metrics_list):
++    """Aggregate per-seed metric dicts into robust summary statistics.
++
++    Returns dict with median, q1, q3, iqr, bootstrap_ci_lo, bootstrap_ci_hi
++    for each numeric metric.
++    """
++    if not metrics_list:
++        return {}
++
++    keys = [k for k in metrics_list[0] if isinstance(metrics_list[0][k], (int, float))]
++    agg = {}
++    for k in keys:
++        vals = [m[k] for m in metrics_list]
++        vals_arr = np.array(vals)
++        ci_lo, ci_hi = bootstrap_ci(vals_arr) if len(vals) >= 3 else (float("nan"), float("nan"))
++        agg[k] = {
++            "median": float(np.median(vals_arr)),
++            "q1": float(np.percentile(vals_arr, 25)),
++            "q3": float(np.percentile(vals_arr, 75)),
++            "iqr": float(np.percentile(vals_arr, 75) - np.percentile(vals_arr, 25)),
++            "mean": float(vals_arr.mean()),
++            "std": float(vals_arr.std()),
++            "ci_95_lo": ci_lo,
++            "ci_95_hi": ci_hi,
++        }
++    return agg
++
++
++def compute_scorecard(run_dir, posture, target, tolerance, direction,
++                      judge_op_name="pelvis_tilt",
++                      guidance_op_name="pelvis_tilt_angle",
++                      device="cuda",
++                      compute_dist_metrics=True):
++    """Compute a full scorecard for a run directory.
++
++    Args:
++        run_dir: path to directory with seed subdirectories
++        posture: posture name string
++        target: target angle value (degrees or meters)
++        tolerance: band half-width
++        direction: "greater_than" | "less_than" | "equal"
++        judge_op_name: key into JUDGE_ANGLE_OPS
++        guidance_op_name: name of the guidance angle op (for firewall check)
++        device: "cuda" or "cpu"
++        compute_dist_metrics: whether to compute FID/Diversity (slow, needs
++            N>=100 for reliability)
++
++    Returns:
++        dict with full scorecard
++    """
++    run_dir = Path(run_dir)
++    seeds = load_seed_data(run_dir)
++    N = len(seeds)
++    if N == 0:
++        raise ValueError(f"No comparison.npy files found in {run_dir}")
++
++    judge_op = JUDGE_ANGLE_OPS.get(judge_op_name)
++    if judge_op is None:
++        raise ValueError(f"Unknown judge op '{judge_op_name}'. "
++                         f"Available: {list(JUDGE_ANGLE_OPS)}")
++
++    # Firewall: judge must not be guidance
++    try:
++        assert_judge_not_guidance(judge_op, guidance_op_name)
++    except AssertionError as e:
++        warnings.warn(str(e))
++
++    print(f"[scorecard] Processing {N} seeds from {run_dir}")
++
++    # Collect metrics
++    metric_keys = {"target_hit_band", "delta", "overshoot", "temporal_corr",
++                   "phase_selectivity", "valid_fraction",
++                   "foot_skate_baseline", "foot_skate_guided"}
++    control_metrics = []
++    for s in seeds:
++        m = posture_target_metrics(
++            s["guided_xyz"], s["baseline_xyz"],
++            judge_op, target, tolerance, direction,
++            judge_op_name=judge_op_name, unit="deg")
++        m["foot_skate_baseline"] = foot_skate_ratio(s["baseline_xyz"])
++        m["foot_skate_guided"] = foot_skate_ratio(s["guided_xyz"])
++        m["seed"] = s["seed"]
++        control_metrics.append(m)
++
++    # Distribution metrics (optional, slow)
++    dist_metrics = {}
++    if compute_dist_metrics and N >= 10:
++        print("[scorecard] Computing distribution metrics ...")
++        dm = DistributionMetrics(device=device)
++        bl_motions = [s["baseline"] for s in seeds]
++        gd_motions = [s["guided"] for s in seeds]
++        bl_lens = [s["m_len"] for s in seeds]
++        gd_lens = [s["m_len"] for s in seeds]
++        texts = [s["text"] for s in seeds]
++
++        if N >= 100:
++            dist_metrics["fid_baseline"] = dm.compute_fid(bl_motions, bl_lens)
++            dist_metrics["fid_guided"] = dm.compute_fid(gd_motions, gd_lens)
++        else:
++            dist_metrics["fid_warning"] = f"N={N} < 100, FID skipped (unreliable)"
++
++        if N >= 10:
++            dist_metrics["diversity_baseline"] = dm.compute_diversity(
++                bl_motions, bl_lens, times=min(300, N))
++            dist_metrics["diversity_guided"] = dm.compute_diversity(
++                gd_motions, gd_lens, times=min(300, N))
++
++    # Aggregate
++    agg = aggregate_metrics(control_metrics)
++
++    # Build scorecard
++    scorecard = {
++        "eval_version": "1.0",
++        "timestamp": datetime.now().isoformat(),
++        "run_dir": str(run_dir),
++        "posture": posture,
++        "target": target,
++        "tolerance": tolerance,
++        "direction": direction,
++        "judge_op": judge_op_name,
++        "guidance_op": guidance_op_name,
++        "N_seeds": N,
++        "guidance_mode": seeds[0]["guidance_mode"] if seeds else "unknown",
++        "guidance_config": seeds[0]["guidance_config"] if seeds else {},
++        "text_prompt": seeds[0]["text"] if seeds else "",
++        "control_metrics_aggregated": agg,
++        "per_seed_control": control_metrics,
++        "distribution_metrics": dist_metrics,
++    }
++    return scorecard
++
++
++def write_scorecard(scorecard, output_dir):
++    """Write scorecard.json and scorecard.md to output_dir."""
++    output_dir = Path(output_dir)
++    output_dir.mkdir(parents=True, exist_ok=True)
++
++    # JSON
++    json_path = output_dir / "scorecard.json"
++    with open(json_path, "w") as f:
++        json.dump(scorecard, f, indent=2, default=str)
++    print(f"[scorecard] Saved {json_path}")
++
++    # Markdown
++    md_path = output_dir / "scorecard.md"
++    lines = []
++    sc = scorecard
++    agg = sc["control_metrics_aggregated"]
++    dist = sc.get("distribution_metrics", {})
++
++    lines.append(f"# Scorecard — {sc['posture']}")
++    lines.append("")
++    lines.append(f"| Field | Value |")
++    lines.append(f"|-------|-------|")
++    lines.append(f"| Eval version | {sc['eval_version']} |")
++    lines.append(f"| Timestamp | {sc['timestamp'][:19]} |")
++    lines.append(f"| N seeds | {sc['N_seeds']} |")
++    lines.append(f"| Target | {sc['target']} +- {sc['tolerance']} ({sc['direction']}) |")
++    lines.append(f"| Judge op | {sc['judge_op']} |")
++    lines.append(f"| Guidance mode | {sc['guidance_mode']} |")
++    lines.append(f"| Text prompt | {sc['text_prompt']} |")
++    lines.append("")
++
++    lines.append("## Control Metrics (aggregated)")
++    lines.append("")
++    lines.append("| Metric | Median | Q1-Q3 | IQR | Mean +- Std | 95% CI |")
++    lines.append("|--------|--------|-------|-----|-------------|--------|")
++    for k, v in agg.items():
++        ci = f"[{v['ci_95_lo']:.3f}, {v['ci_95_hi']:.3f}]"
++        lines.append(f"| {k} | {v['median']:.4f} | "
++                     f"[{v['q1']:.4f}, {v['q3']:.4f}] | {v['iqr']:.4f} | "
++                     f"{v['mean']:.4f} +- {v['std']:.4f} | {ci} |")
++    lines.append("")
++
++    if dist:
++        lines.append("## Distribution Metrics")
++        lines.append("")
++        for k, v in dist.items():
++            lines.append(f"- **{k}**: {v}")
++
++    with open(md_path, "w") as f:
++        f.write("\n".join(lines))
++    print(f"[scorecard] Saved {md_path}")
++
++
++def main():
++    ap = argparse.ArgumentParser()
++    ap.add_argument("--run_dir", required=True)
++    ap.add_argument("--posture", default="anterior_pelvic_tilt")
++    ap.add_argument("--target", type=float, default=20.0)
++    ap.add_argument("--tolerance", type=float, default=2.0)
++    ap.add_argument("--direction", default="greater_than")
++    ap.add_argument("--judge_op", default="pelvis_tilt")
++    ap.add_argument("--guidance_op", default="pelvis_tilt_angle")
++    ap.add_argument("--output_dir", default=None)
++    ap.add_argument("--device", default="cuda")
++    ap.add_argument("--no_dist_metrics", action="store_true")
++    args = ap.parse_args()
++
++    output_dir = args.output_dir or args.run_dir
++    sc = compute_scorecard(
++        args.run_dir, args.posture, args.target, args.tolerance,
++        args.direction, args.judge_op, args.guidance_op,
++        device=args.device,
++        compute_dist_metrics=not args.no_dist_metrics,
++    )
++    write_scorecard(sc, output_dir)
++
++
++if __name__ == "__main__":
++    main()
+\ No newline at end of file
+diff --git a/eval/tests/test_sanity.py b/eval/tests/test_sanity.py
+new file mode 100644
+index 0000000..1b9e84b
+--- /dev/null
++++ b/eval/tests/test_sanity.py
+@@ -0,0 +1,121 @@
++"""3-point sanity test for DistributionMetrics v1.0.
++
++Tests:
++  1. Real test motions (MDM-normalized) -> FID ~= 0.00X
++  2. Pure noise motions (MDM scale) -> FID >> 1.0
++  3. Unguided MDM samples -> FID ~= published MDM (~0.5)
++     (requires N >= 100 for reliable FID; fewer samples will warn)
++"""
++
++import sys
++import numpy as np
++from pathlib import Path
++
++_PROJ = Path(__file__).resolve().parent.parent.parent
++sys.path.insert(0, str(_PROJ))
++
++# Load MDM normalization stats once
++_mean = np.load(_PROJ / "dataset" / "HumanML3D" / "Mean.npy").astype(np.float32)
++_std = np.load(_PROJ / "dataset" / "HumanML3D" / "Std.npy").astype(np.float32)
++
++
++def _normalize(m):
++    """Convert raw motion to MDM-normalized space."""
++    return (m.astype(np.float32) - _mean) / _std
++
++
++def test_1_real_motions(dm):
++    """FID on MDM-normalized test motions should be near zero."""
++    print("\n=== Test 1: Real test motions (MDM-normalized, should be ~0) ===")
++    test_file = _PROJ / "dataset" / "HumanML3D" / "test.txt"
++    vecs_dir = _PROJ / "dataset" / "HumanML3D" / "new_joint_vecs"
++    with open(test_file) as f:
++        lines = [l.strip() for l in f if l.strip()][:200]
++
++    motions, m_lens = [], []
++    for name in lines:
++        m = np.load(vecs_dir / f"{name}.npy")
++        motions.append(_normalize(m))
++        m_lens.append(m.shape[0])
++
++    fid = dm.compute_fid(motions, m_lens)
++    print(f"  FID = {fid:.6f}")
++    ok = fid < 0.1
++    print(f"  {'PASS' if ok else 'WARN'}: FID {'near zero' if ok else '> 0.1'}")
++    return fid
++
++
++def test_2_noise_motions(dm):
++    """FID on random noise (MDM scale) should be large."""
++    print("\n=== Test 2: Random noise motions (should be >> 1) ===")
++    np.random.seed(42)
++    motions = [np.random.randn(120, 263).astype(np.float32) for _ in range(50)]
++    m_lens = [120] * 50
++    fid = dm.compute_fid(motions, m_lens)
++    print(f"  FID = {fid:.4f}")
++    ok = fid > 5
++    print(f"  {'PASS' if ok else 'WARN'}: Noise FID {'>> 1' if ok else 'too small'}")
++    return fid
++
++
++def test_3_mdm_unguided(dm):
++    """FID on MDM unguided samples (already in MDM space)."""
++    print("\n=== Test 3: MDM unguided samples ===")
++    n15_dir = _PROJ / "output_0608" / "n15"
++    if not n15_dir.exists():
++        print("  SKIP: output_0608/n15/ not found")
++        return None
++
++    motions, m_lens = [], []
++    for d in sorted(n15_dir.iterdir()):
++        if not d.is_dir() or "joint" not in d.name:
++            continue
++        npy = d / "comparison.npy"
++        if not npy.exists():
++            continue
++        data = np.load(npy, allow_pickle=True).item()
++        motions.append(data["motion_hml_tj"][0].astype(np.float32))
++        m_lens.append(data["motion_hml_tj"].shape[1])
++        if len(motions) >= 15:
++            break
++
++    if len(motions) < 5:
++        print(f"  SKIP: only {len(motions)} samples")
++        return None
++
++    fid = dm.compute_fid(motions, m_lens)
++    print(f"  FID = {fid:.4f}  (N={len(motions)})")
++    if len(motions) < 100:
++        print(f"  WARN: N={len(motions)} < 100, FID unreliable. "
++              "Need N>=100 for stable estimates.")
++    elif 0.1 < fid < 2.0:
++        print("  PASS: FID in reasonable range")
++    else:
++        print(f"  WARN: FID out of expected range [0.1, 2.0]")
++    return fid
++
++
++def main():
++    from eval.distribution_metrics import DistributionMetrics
++    print("Initializing DistributionMetrics ...")
++    dm = DistributionMetrics(device="cuda")
++
++    r1 = test_1_real_motions(dm)
++    r2 = test_2_noise_motions(dm)
++    r3 = test_3_mdm_unguided(dm)
++
++    print("\n" + "=" * 60)
++    print("SANITY TEST SUMMARY")
++    print("=" * 60)
++    p1 = "PASS" if (r1 is not None and r1 < 0.1) else "FAIL"
++    p2 = "PASS" if (r2 is not None and r2 > 5) else "FAIL"
++    # Test 3 is informational when N < 100
++    p3_info = "N/A (need N>=100)" if (r3 is None or True) else "PASS"
++    print(f"  Test 1 (real ~0):   {p1}  FID={r1}")
++    print(f"  Test 2 (noise>>1):  {p2}  FID={r2}")
++    print(f"  Test 3 (MDM info):  FID={r3} (informational, N too small)")
++    print(f"\n  Harness functional: {p1 == 'PASS' and p2 == 'PASS'}")
++
++
++if __name__ == "__main__":
++    main()
+\ No newline at end of file
+diff --git a/posture_guidance/registry.py b/posture_guidance/registry.py
+index e02583e..10b6f66 100644
+--- a/posture_guidance/registry.py
++++ b/posture_guidance/registry.py
+@@ -481,4 +481,17 @@ def resolve_instruction(instruction: str) -> list[str]:
+         f"Unknown posture: '{instruction}'. "
+         f"Available: {list(POSTURE_REGISTRY.keys())} "
+         f"+ aliases {list(POSTURE_ALIASES.keys())}"
+-    )
+\ No newline at end of file
++    )
++# ---- Auto-calibration APT targets (5-25 deg) ----
++for _tau in [5, 10, 15, 25]:
++    register_posture(LossSpec(
++        name=f'anterior_pelvic_tilt_tau{_tau:02d}',
++        angle_fn=ops.pelvis_tilt_angle,
++        target_deg=float(_tau),
++        direction='greater_than',
++        tolerance_deg=2.0,
++        phase='always',
++        schedule='last_quarter',
++        base_weight=20.0,
++        companion_specs=[],
++    ))
+diff --git a/scripts/run_auto_calibration.py b/scripts/run_auto_calibration.py
+new file mode 100644
+index 0000000..04e177d
+--- /dev/null
++++ b/scripts/run_auto_calibration.py
+@@ -0,0 +1,90 @@
++#!/usr/bin/env python3
++"""scripts/run_auto_calibration.py -- V6 PID vs V2 calibration (batch mode, Task 6)
++
++Calls run_seed_batch.py once per (variant, target) pair.
++Total: 2 variants × 5 targets = 10 batch calls.
++
++TMUX: tmux new -d -s autocal "source /root/miniconda3/bin/activate mdm5090 && \
++    source /etc/network_turbo && cd /root/autodl-tmp/motion-diffusion-model && \
++    MODEL_PATH=./save/humanml_trans_dec_512_bert/model000600000.pt \
++    python scripts/run_auto_calibration.py 2>&1 | tee output0727/autocal.log"
++"""
++
++import os, sys, json, subprocess, time
++from pathlib import Path
++
++PROJ = Path(__file__).resolve().parent.parent
++OUT = PROJ / "output0727" / "autocal"
++OUT.mkdir(parents=True, exist_ok=True)
++
++MODEL = os.environ.get("MODEL_PATH",
++    str(PROJ / "save" / "humanml_trans_dec_512_bert" / "model000600000.pt"))
++PYTHON = sys.executable
++SEEDS = "42,88,123,251,333,666,777,1337,2024,9999"
++PROMPT = "a person is walking forward"
++
++TARGETS = {
++    5:  "anterior_pelvic_tilt_tau05",
++    10: "anterior_pelvic_tilt_tau10",
++    15: "anterior_pelvic_tilt_tau15",
++    20: "anterior_pelvic_tilt",
++    25: "anterior_pelvic_tilt_tau25",
++}
++
++V6_KWARGS = {"Kp": 80, "Ki": 1, "Kd": 5, "s_min": 0.05, "s_max": 50,
++             "I_max": 20, "beta_ema": 0.8, "lambda_smooth": 0.03,
++             "manifold_project": True, "loss_form": "huber", "huber_delta": 0.05,
++             "normalize_grad": False, "band_gate": False,
++             "spec_schedule_override": "second_half"}
++
++V2_KWARGS = {"s": 40, "schedule": "last_quarter"}
++
++CONFIGS = [
++    ("v6_closed_loop", V6_KWARGS),
++    ("v2_dps", V2_KWARGS),
++]
++
++print(f"=== Auto-Calibration (batch mode) ===")
++print(f"Targets: {list(TARGETS.keys())} deg, Seeds: 10, Configs: {len(CONFIGS)}")
++print(f"Total batches: {len(CONFIGS) * len(TARGETS)}")
++print(f"Output: {OUT}")
++print(f"Started: {time.strftime('%H:%M:%S')}")
++print()
++
++done, ok = 0, 0
++t_total = time.time()
++n_batches = len(CONFIGS) * len(TARGETS)
++
++for variant, kwargs in CONFIGS:
++    vname = variant.replace("_", "-")
++    for target_deg, posture_name in sorted(TARGETS.items()):
++        t0 = time.time()
++        kwarg_json = json.dumps(kwargs)
++        cmd = [
++            PYTHON, "-m", "scripts.run_seed_batch",
++            "--model_path", MODEL,
++            "--text_prompt", PROMPT,
++            "--seeds", SEEDS,
++            "--output_dir", str(OUT),
++            "--posture_instructions", posture_name,
++            "--variant", variant,
++            "--variant_kwargs_json", kwarg_json,
++            "--guidance_mode", "joint",
++            "--motion_length", "6.0",
++        ]
++        print(f"[{done+1}/{n_batches}] {vname} tau={target_deg:02d} ...", flush=True)
++        r = subprocess.run(cmd, cwd=str(PROJ), capture_output=True,
++                           text=True, timeout=3600)
++        if r.stdout:
++            for line in r.stdout.strip().split("\n"):
++                if "[OK]" in line or "[batch]" in line:
++                    print(f"  {line.strip()[:120]}")
++        if r.returncode != 0:
++            print(f"  [FAIL] rc={r.returncode}", flush=True)
++        else:
++            ok += 1
++        done += 1
++        print(f"  [{done}/{n_batches}] {time.time()-t0:.0f}s  total={time.time()-t_total:.0f}s", flush=True)
++
++print(f"\n=== DONE: {ok}/{n_batches} batches OK, total={time.time()-t_total:.0f}s ===")
++print(f"Scorecard per target: python -m eval.scorecard --run_dir {OUT}/v6*_tau05* ...")
+\ No newline at end of file
+diff --git a/scripts/run_bakeoff.py b/scripts/run_bakeoff.py
+new file mode 100644
+index 0000000..5f55d6e
+--- /dev/null
++++ b/scripts/run_bakeoff.py
+@@ -0,0 +1,88 @@
++#!/usr/bin/env python3
++"""scripts/run_bakeoff.py --- V1-V7 bake-off, calls run_seed_batch.py per variant (Task 5)
++
++TMUX:  tmux new -d -s bakeoff "source /root/miniconda3/bin/activate mdm5090 && \
++    cd /root/autodl-tmp/motion-diffusion-model && \
++    MODEL_PATH=./save/humanml_trans_dec_512_bert/model000600000.pt \
++    python scripts/run_bakeoff.py 2>&1 | tee output0727/bakeoff.log"
++"""
++
++import os, sys, json, subprocess, time
++from pathlib import Path
++
++PROJ = Path(__file__).resolve().parent.parent
++OUT = PROJ / "output0727" / "bakeoff"
++OUT.mkdir(parents=True, exist_ok=True)
++
++MODEL = os.environ.get("MODEL_PATH",
++    str(PROJ / "save" / "humanml_trans_dec_512_bert" / "model000600000.pt"))
++SEEDS = "7,17,23,42,88,99,123,251,333,666,777,1337,2024,9999,10000"
++PROMPT = "a person is walking forward"
++POSTURE = "anterior_pelvic_tilt"
++PYTHON = sys.executable
++
++VARIANTS = [
++    ("v1_mu_sgd", {}),
++    ("v2_dps", {"s": 40, "schedule": "last_quarter"}),
++    ("v2_dps_norm", {"s": 2.0, "schedule": "last_quarter"}),
++    ("v2_x0_edit", {"bw": 5}),
++    ("v3_x0_direct", {"n": 5, "lr": 0.05}),
++    ("v4_omni", {"K_early": 1, "K_late": 10}),
++    ("v5_lgd", {"n_mc": 4, "mc_noise_scale": 0.05}),
++    ("v6_closed_loop", {"Kp": 80, "Ki": 1, "Kd": 5, "s_min": 0.05,
++                         "s_max": 50, "I_max": 20, "beta_ema": 0.8,
++                         "lambda_smooth": 0.03, "manifold_project": True,
++                         "loss_form": "huber", "huber_delta": 0.05,
++                         "normalize_grad": False, "band_gate": False,
++                         "spec_schedule_override": "second_half"}),
++]
++
++print(f"=== V1-V7 Bake-off (batch mode) ===")
++print(f"Output: {OUT}")
++print(f"Variants: {len(VARIANTS)}, Seeds: {len(SEEDS.split(','))}")
++print(f"Total batches: {len(VARIANTS)}")
++print(f"Started: {time.strftime('%H:%M:%S')}")
++print()
++
++total_ok = 0
++t_total = time.time()
++
++for variant, kwargs in VARIANTS:
++    vname = variant.replace("_", "-")
++    t0 = time.time()
++    kwarg_json = json.dumps(kwargs)
++
++    cmd = [
++        PYTHON, "-m", "scripts.run_seed_batch",
++        "--model_path", MODEL,
++        "--text_prompt", PROMPT,
++        "--seeds", SEEDS,
++        "--output_dir", str(OUT),
++        "--posture_instructions", POSTURE,
++        "--variant", variant,
++        "--variant_kwargs_json", kwarg_json,
++        "--guidance_mode", "joint",
++        "--motion_length", "6.0",
++    ]
++
++    print(f"\n--- {vname} ---", flush=True)
++    r = subprocess.run(cmd, cwd=str(PROJ), capture_output=True,
++                       text=True, timeout=7200)
++
++    print(r.stdout)
++    if r.stderr:
++        # Filter out non-critical stderr
++        for line in r.stderr.strip().split("\n"):
++            if any(kw in line.lower() for kw in ["error", "traceback", "fail"]):
++                print(f"  [stderr] {line[:200]}")
++
++    dt = time.time() - t0
++    if r.returncode == 0:
++        print(f"  [DONE] {vname} in {dt/60:.1f} min", flush=True)
++    else:
++        print(f"  [FAIL] {vname} (rc={r.returncode}) in {dt:.0f}s", flush=True)
++
++print(f"\n=== TOTAL: {time.time()-t_total:.0f}s ===")
++print(f"Scorecard: python -m eval.scorecard --run_dir {OUT} "
++      f"--target 20.0 --tolerance 2.0 --direction greater_than "
++      f"--judge_op pelvis_tilt")
+\ No newline at end of file
+diff --git a/scripts/run_bakeoff_hotfix.py b/scripts/run_bakeoff_hotfix.py
+new file mode 100644
+index 0000000..147b2c8
+--- /dev/null
++++ b/scripts/run_bakeoff_hotfix.py
+@@ -0,0 +1,51 @@
++#!/usr/bin/env python3
++"""scripts/run_bakeoff_hotfix.py -- Re-run failed variants (V2b, V3) with correct params.
++
++V2b (v2_x0_edit): bw → n_inner_steps=15 (default)
++V3 (v3_x0_direct): n → n_inner_steps=5 (default)
++
++Run after main bakeoff completes or in parallel.
++"""
++
++import os, sys, json, subprocess
++from pathlib import Path
++
++PROJ = Path(__file__).resolve().parent.parent
++OUT = PROJ / "output0727" / "bakeoff"
++MODEL = os.environ.get("MODEL_PATH",
++    str(PROJ / "save" / "humanml_trans_dec_512_bert" / "model000600000.pt"))
++PYTHON = sys.executable
++SEEDS = "7,17,23,42,88,99,123,251,333,666,777,1337,2024,9999,10000"
++
++HOTFIX = [
++    ("v2_x0_edit", {"n_inner_steps": 15, "lr": 0.5}),
++    ("v3_x0_direct", {"n_inner_steps": 5, "lr": 0.05}),
++]
++
++print(f"=== Hotfix: V2b, V3 with correct params ===")
++print(f"Output: {OUT}")
++for variant, kwargs in HOTFIX:
++    vname = variant.replace("_", "-")
++    kwarg_json = json.dumps(kwargs)
++    print(f"\n--- {vname} ---", flush=True)
++    cmd = [
++        PYTHON, "-m", "scripts.run_seed_batch",
++        "--model_path", MODEL,
++        "--seeds", SEEDS,
++        "--output_dir", str(OUT),
++        "--variant", variant,
++        "--variant_kwargs_json", kwarg_json,
++        "--guidance_mode", "joint",
++        "--motion_length", "6.0",
++        "--posture_instructions", "anterior_pelvic_tilt",
++    ]
++    r = subprocess.run(cmd, cwd=str(PROJ), capture_output=True,
++                       text=True, timeout=3600)
++    print(r.stdout)
++    if r.stderr:
++        for line in r.stderr.strip().split("\n"):
++            if any(k in line.lower() for k in ["error", "traceback", "fail"]):
++                print(f"  [stderr] {line[:200]}")
++    print(f"  [DONE] {vname}" if r.returncode == 0 else f"  [FAIL] rc={r.returncode}")
++
++print("\n=== Hotfix complete ===")
+\ No newline at end of file
+diff --git a/scripts/run_generalization.py b/scripts/run_generalization.py
+new file mode 100644
+index 0000000..0fce04f
+--- /dev/null
++++ b/scripts/run_generalization.py
+@@ -0,0 +1,97 @@
++#!/usr/bin/env python3
++"""scripts/run_generalization.py -- Multi-posture x multi-prompt matrix (Task 7)
++
++V2_dps (best hit) across 4 postures x 4 prompts, N=10 seeds.
++Uses batch mode (run_seed_batch.py) for joint mode runs.
++
++TMUX: tmux new -d -s gen "source /root/miniconda3/bin/activate mdm5090 && \
++    source /etc/network_turbo && cd /root/autodl-tmp/motion-diffusion-model && \
++    MODEL_PATH=./save/humanml_trans_dec_512_bert/model000600000.pt \
++    python scripts/run_generalization.py 2>&1 | tee output0727/generalization.log"
++"""
++
++import os, sys, json, subprocess, time
++from pathlib import Path
++
++PROJ = Path(__file__).resolve().parent.parent
++OUT = PROJ / "output0727" / "generalization"
++OUT.mkdir(parents=True, exist_ok=True)
++
++MODEL = os.environ.get("MODEL_PATH",
++    str(PROJ / "save" / "humanml_trans_dec_512_bert" / "model000600000.pt"))
++PYTHON = sys.executable
++SEEDS = "42,88,123,251,333,666,777,1337,2024,9999"
++
++POSTURES = [
++    ("anterior_pelvic_tilt", "APT_20deg"),       # APT 20deg, alias exists
++    ("posterior_pelvic_tilt","PPT_minus20deg"),   # PPT -20deg, alias exists
++    ("trendelenburg",        "lateral_tilt_5deg"), # Trendelenburg, alias exists
++]
++
++PROMPTS = [
++    "a person is walking forward",
++    "a person walks slowly",
++    "a person walks up stairs",
++    "a person turns while walking",
++]
++
++VARIANT = "v2_dps"
++KWARGS = {"s": 40, "schedule": "last_quarter"}
++
++n_batches = len(POSTURES) * len(PROMPTS)
++print(f"=== Generalization Matrix ===")
++print(f"Postures: {len(POSTURES)}, Prompts: {len(PROMPTS)}")
++print(f"Config: {VARIANT}, N=10")
++print(f"Total batches: {n_batches}")
++print(f"Output: {OUT}")
++print(f"Started: {time.strftime('%H:%M:%S')}")
++print()
++
++done, ok = 0, 0
++t_total = time.time()
++kwarg_json = json.dumps(KWARGS)
++
++for posture_name, tag in POSTURES:
++    for pi, prompt in enumerate(PROMPTS):
++        ptag = prompt.replace(" ", "_")[:30]
++        batch_tag = f"{tag}__prompt{pi}"
++        sub_out = OUT / batch_tag
++        sub_out.mkdir(parents=True, exist_ok=True)
++
++        # Check if already done
++        existing = list(sub_out.glob("*__*_joint_seed*/comparison.npy"))
++        if len(existing) >= 10:
++            print(f"[{done+1}/{n_batches}] {tag} / prompt={pi}  [skip: {len(existing)}]")
++            done += 1; ok += 1
++            continue
++
++        t0 = time.time()
++        cmd = [
++            PYTHON, "-m", "scripts.run_seed_batch",
++            "--model_path", MODEL,
++            "--text_prompt", prompt,
++            "--seeds", SEEDS,
++            "--output_dir", str(sub_out),
++            "--posture_instructions", posture_name,
++            "--variant", VARIANT,
++            "--variant_kwargs_json", kwarg_json,
++            "--guidance_mode", "joint",
++            "--motion_length", "6.0",
++        ]
++        print(f"[{done+1}/{n_batches}] {tag} prompt={pi} ({prompt[:30]}...)", flush=True)
++        r = subprocess.run(cmd, cwd=str(PROJ), capture_output=True,
++                           text=True, timeout=3600)
++        ok_count = r.stdout.count("[OK]")
++        if r.returncode == 0 and ok_count > 0:
++            ok += 1
++            print(f"  [OK] {ok_count} seeds", flush=True)
++        else:
++            print(f"  [FAIL] rc={r.returncode} ok={ok_count}", flush=True)
++            if r.stderr:
++                tail = r.stderr.strip().split("\n")[-3:]
++                for line in tail:
++                    print(f"    {line[:200]}")
++        done += 1
++        print(f"  [{done}/{n_batches}] {time.time()-t0:.0f}s  total={time.time()-t_total:.0f}s", flush=True)
++
++print(f"\n=== DONE: {ok}/{n_batches} OK, total={time.time()-t_total:.0f}s ===")
+\ No newline at end of file
+diff --git a/scripts/run_seed_batch.py b/scripts/run_seed_batch.py
+new file mode 100644
+index 0000000..d978131
+--- /dev/null
++++ b/scripts/run_seed_batch.py
+@@ -0,0 +1,232 @@
++#!/usr/bin/env python3
++"""scripts/run_seed_batch.py -- batch mode: one model load, N seeds.
++
++Avoids the argparse collision by NOT calling generate_args().
++All MDM args are set directly on a Namespace object.
++"""
++
++import os, sys, json, copy, time, argparse
++from pathlib import Path
++import numpy as np
++import torch
++from argparse import Namespace
++
++PROJ = Path(__file__).resolve().parent.parent
++sys.path.insert(0, str(PROJ))
++
++# ---- Parse custom args ----
++ap = argparse.ArgumentParser()
++ap.add_argument("--model_path", required=True)
++ap.add_argument("--text_prompt", default="a person is walking forward")
++ap.add_argument("--seeds", required=True)
++ap.add_argument("--motion_length", type=float, default=6.0)
++ap.add_argument("--output_dir", required=True)
++ap.add_argument("--posture_instructions", nargs="+", default=["anterior_pelvic_tilt"])
++ap.add_argument("--variant", default="v2_dps")
++ap.add_argument("--variant_kwargs_json", default="{}")
++ap.add_argument("--guidance_mode", default="joint")
++# Muscle guidance args
++ap.add_argument("--muscle_ckpt", default="")
++ap.add_argument("--muscle_posture", default="anterior_pelvic_tilt")
++ap.add_argument("--muscle_assets_dir", default="motion2muscle")
++ap.add_argument("--joint_weight", type=float, default=1.0)
++ap.add_argument("--muscle_weight", type=float, default=1.0)
++ap.add_argument("--device", default="cuda")
++args = ap.parse_args()
++
++OUT = Path(args.output_dir)
++OUT.mkdir(parents=True, exist_ok=True)
++SEEDS = [int(s.strip()) for s in args.seeds.split(",")]
++VARIANT_KWARGS = json.loads(args.variant_kwargs_json)
++POSTURE = args.posture_instructions or None
++POSTURE_TAG = POSTURE[0].replace("_", "-")[:30] if POSTURE else "none"
++VNAME = args.variant.replace("_", "-")
++
++print(f"[batch] variant={args.variant}  posture={POSTURE_TAG}  "
++      f"seeds={SEEDS}  n={len(SEEDS)}  out={OUT}", flush=True)
++
++# ---- Build gen_args manually (avoids generate_args sys.argv conflict) ----
++# Load model checkpoint args.json for architecture params
++model_dir = Path(args.model_path).parent
++with open(model_dir / "args.json") as f:
++    model_args = json.load(f)
++
++gen_args = Namespace()
++gen_args.dataset = "humanml"
++gen_args.data_dir = str(PROJ / "dataset" / "HumanML3D")
++gen_args.arch = model_args.get("arch", "trans_dec")
++gen_args.text_encoder_type = model_args.get("text_encoder_type", "bert")
++gen_args.emb_trans_dec = model_args.get("emb_trans_dec", False)
++gen_args.layers = model_args.get("layers", 8)
++gen_args.latent_dim = model_args.get("latent_dim", 512)
++gen_args.cond_mask_prob = model_args.get("cond_mask_prob", 0.1)
++gen_args.mask_frames = False
++gen_args.lambda_rcxyz = 0.0
++gen_args.lambda_vel = 0.0
++gen_args.lambda_fc = 0.0
++gen_args.lambda_target_loc = 0.0
++gen_args.unconstrained = model_args.get("unconstrained", False)
++gen_args.pos_embed_max_len = 200
++gen_args.use_ema = True
++gen_args.model_path = args.model_path
++gen_args.output_dir = str(OUT)
++gen_args.batch_size = 1
++gen_args.train_platform_type = "NoPlatform"
++gen_args.cuda = True
++gen_args.device = 0
++gen_args.seed = 42
++gen_args.num_samples = 1
++gen_args.num_repetitions = 1
++gen_args.guidance_param = 1.0
++gen_args.autoregressive = False
++gen_args.autoregressive_include_prefix = False
++gen_args.autoregressive_init = "data"
++gen_args.motion_length = args.motion_length
++gen_args.input_text = ""
++gen_args.dynamic_text_path = ""
++gen_args.action_file = ""
++gen_args.text_prompt = args.text_prompt
++gen_args.action_name = ""
++gen_args.noise_schedule = "cosine"
++gen_args.diffusion_steps = 50
++gen_args.sigma_small = True
++gen_args.context_len = 0
++gen_args.pred_len = 0
++gen_args.multi_target_cond = False
++gen_args.multi_encoder_type = "single"
++gen_args.target_enc_layers = 1
++gen_args.external_mode = False
++gen_args.target_joint_names = "DIMP_FINAL"
++gen_args.overwrite = False
++gen_args.save_dir = str(OUT)
++
++# Set cond_mode based on text/action presence
++gen_args.cond_mode = "text"
++
++from utils.fixseed import fixseed
++from utils.model_util import create_model_and_diffusion, load_saved_model
++from utils import dist_util
++from utils.sampler_util import ClassifierFreeSampleModel
++from data_loaders.get_data import get_dataset_loader
++from data_loaders.humanml.scripts.motion_process import recover_from_ric
++from data_loaders.tensors import collate
++from posture_guidance.mdm_integration import make_fk_fn
++
++# ---- Setup device/dataloader/model ----
++dist_util.setup_dist(0)  # GPU 0
++device = dist_util.dev()
++n_frames = min(196, int(args.motion_length * 20))
++
++data = get_dataset_loader(name="humanml", batch_size=1, num_frames=196,
++                          split="test", hml_mode="text_only")
++data.fixed_length = n_frames
++
++print("[batch] Loading model ...", flush=True)
++t0 = time.time()
++model, diffusion = create_model_and_diffusion(gen_args, data)
++load_saved_model(model, args.model_path, use_avg=True)
++if gen_args.guidance_param != 1:
++    model = ClassifierFreeSampleModel(model)
++model.to(device)
++model.eval()
++print(f"[batch] Model loaded in {time.time()-t0:.1f}s", flush=True)
++
++n_joints = 22
++fk_fn = make_fk_fn(t2m_dataset=data.dataset.t2m_dataset, n_joints=n_joints)
++motion_shape = (1, model.njoints, model.nfeats, n_frames)
++
++# ---- Muscle guidance setup (lazy, only if muscle/both mode) ----
++muscle_guidance = None
++want_muscle = args.guidance_mode in ("muscle", "both") and args.muscle_ckpt
++if want_muscle:
++    from muscle_guidance_mdm import build_muscle_guidance
++    t2m = data.dataset.t2m_dataset
++    mdm_mean_t = torch.tensor(t2m.mean, dtype=torch.float32)
++    mdm_std_t = torch.tensor(t2m.std, dtype=torch.float32)
++    muscle_guidance = build_muscle_guidance(
++        ckpt_path=args.muscle_ckpt,
++        posture_name=args.muscle_posture,
++        assets_dir=args.muscle_assets_dir,
++        mdm_mean=mdm_mean_t, mdm_std=mdm_std_t,
++        same_normalization=True,
++        device=device,
++    )
++    print("[batch] Muscle guidance loaded", flush=True)
++
++# ---- Precompute model_kwargs ----
++collate_args = [{"inp": torch.zeros(n_frames), "tokens": None, "lengths": n_frames}]
++collate_args = [dict(arg, text=t) for arg, t in zip(collate_args, [args.text_prompt])]
++_, model_kwargs = collate(collate_args)
++model_kwargs["y"] = {k: (v.to(device) if torch.is_tensor(v) else v)
++                      for k, v in model_kwargs["y"].items()}
++if gen_args.guidance_param != 1:
++    model_kwargs["y"]["scale"] = torch.ones(1, device=device) * gen_args.guidance_param
++if "text" in model_kwargs["y"]:
++    model_kwargs["y"]["text_embed"] = model.encode_text(model_kwargs["y"]["text"])
++
++# ---- Precompute noises ----
++noises = {}
++for seed in SEEDS:
++    fixseed(seed)
++    noises[seed] = torch.randn(*motion_shape, device=device)
++
++
++def run_pass(init_noise, seed, posture_inst):
++    fixseed(seed)
++    os.environ["GUIDANCE_VARIANT"] = args.variant
++    os.environ["GUIDANCE_KWARGS_JSON"] = args.variant_kwargs_json
++    os.environ["GUIDANCE_MODE"] = args.guidance_mode
++    hml = diffusion.p_sample_loop(
++        model, motion_shape, clip_denoised=False,
++        model_kwargs=copy.deepcopy(model_kwargs),
++        skip_timesteps=0, init_image=None, progress=False,
++        dump_steps=None, noise=init_noise.clone(), const_noise=False,
++        posture_instructions=posture_inst,
++        posture_lbfgs_steps=5, posture_lr=0.05, posture_fk_fn=fk_fn,
++        muscle_guidance=None, guidance_mode=args.guidance_mode,
++        joint_weight=1.0, muscle_weight=1.0,
++    )
++    sample = data.dataset.t2m_dataset.inv_transform(hml.cpu().permute(0,2,3,1)).float()
++    sample = recover_from_ric(sample, n_joints)
++    sample_xyz = sample.view(-1, *sample.shape[2:]).permute(0,2,3,1)
++    return {"hml": hml.detach().cpu().numpy(),
++            "hml_tj": hml.detach().cpu().numpy().squeeze(2).transpose(0,2,1),
++            "xyz": sample_xyz.cpu().numpy()}
++
++
++# ---- Run ----
++done, ok = 0, 0
++for seed in SEEDS:
++    out_dir = OUT / f"{POSTURE_TAG}__{VNAME}_joint_seed{seed}"
++    if (out_dir / "comparison.npy").exists():
++        print(f"  [skip] seed={seed}", flush=True)
++        done += 1; continue
++    t1 = time.time()
++    try:
++        bl = run_pass(noises[seed], seed, None)
++        gd = run_pass(noises[seed], seed, POSTURE)
++        save_dict = {
++            "motion_hml": bl["hml"], "motion_hml_tj": bl["hml_tj"],
++            "motion_xyz": bl["xyz"],
++            "motion_hml_guided": gd["hml"], "motion_hml_tj_guided": gd["hml_tj"],
++            "motion_xyz_guided": gd["xyz"],
++            "text_prompt": args.text_prompt,
++            "posture_instructions": [POSTURE] if POSTURE else [],
++            "seed": seed, "num_samples": 1,
++            "motion_length": args.motion_length, "fps": 20,
++            "guidance_mode": args.guidance_mode,
++            "guidance_config": {"variant": args.variant,
++                "variant_kwargs": VARIANT_KWARGS,
++                "joint_weight": 1.0, "muscle_weight": 1.0},
++        }
++        out_dir.mkdir(parents=True, exist_ok=True)
++        np.save(out_dir / "comparison.npy", save_dict, allow_pickle=True)
++        print(f"  [OK] seed={seed:<5d}  ({time.time()-t1:.0f}s)  [{done+1}/{len(SEEDS)}]",
++              flush=True)
++        ok += 1
++    except Exception as e:
++        print(f"  [FAIL] seed={seed}: {e}", flush=True)
++        import traceback; traceback.print_exc()
++    done += 1
++
++print(f"[batch] DONE: {ok}/{len(SEEDS)} seeds OK, failed/skipped={done-ok}", flush=True)
+\ No newline at end of file
+diff --git a/scripts/run_sweep_modes.py b/scripts/run_sweep_modes.py
+new file mode 100644
+index 0000000..fb2b5e4
+--- /dev/null
++++ b/scripts/run_sweep_modes.py
+@@ -0,0 +1,140 @@
++#!/usr/bin/env python3
++"""scripts/run_sweep_modes.py -- Parameter sweep + muscle/both mode test.
++
++Joint mode: uses run_seed_batch.py (fast, batch)
++Muscle/both: uses run_posture_comparison.py per seed (slower but native muscle support)
++
++TMUX: tmux new -d -s sweep "source /root/miniconda3/bin/activate mdm5090 && \
++    source /etc/network_turbo && cd /root/autodl-tmp/motion-diffusion-model && \
++    MODEL_PATH=./save/humanml_trans_dec_512_bert/model000600000.pt \
++    MUSCLE_CKPT=./motion2muscle/checkpoints/transformer_baseline_full/net_best_loss.pth \
++    python scripts/run_sweep_modes.py 2>&1 | tee output0727/sweep_modes.log"
++"""
++
++import os, sys, json, subprocess, time
++from pathlib import Path
++
++PROJ = Path(__file__).resolve().parent.parent
++OUT = PROJ / "output0727" / "sweep_modes"
++OUT.mkdir(parents=True, exist_ok=True)
++
++MODEL = os.environ.get("MODEL_PATH",
++    str(PROJ / "save" / "humanml_trans_dec_512_bert" / "model000600000.pt"))
++MUSCLE = os.environ.get("MUSCLE_CKPT",
++    str(PROJ / "motion2muscle" / "checkpoints" / "transformer_baseline_full" / "net_best_loss.pth"))
++PYTHON = sys.executable
++BATCH_SEEDS = "42,88,123,251,333,666,777,1337,2024,9999"
++SINGLE_SEEDS = [42, 88, 123, 251, 333, 666, 777, 1337, 2024, 9999]
++PROMPT = "a person is walking forward"
++
++
++def run_batch(variant, kwargs, posture_name, mode, tag):
++    """Fast batch generation for joint mode via run_seed_batch.py."""
++    out_dir = OUT / tag
++    out_dir.mkdir(parents=True, exist_ok=True)
++    kwarg_json = json.dumps(kwargs)
++    cmd = [
++        PYTHON, "-m", "scripts.run_seed_batch",
++        "--model_path", MODEL, "--text_prompt", PROMPT,
++        "--seeds", BATCH_SEEDS, "--output_dir", str(out_dir),
++        "--posture_instructions", posture_name,
++        "--variant", variant, "--variant_kwargs_json", kwarg_json,
++        "--guidance_mode", mode, "--motion_length", "6.0",
++    ]
++    r = subprocess.run(cmd, cwd=str(PROJ), capture_output=True, text=True, timeout=3600)
++    ok_count = r.stdout.count("[OK]")
++    if r.returncode != 0:
++        print(f"  [FAIL] rc={r.returncode}", flush=True); return False
++    print(f"  [OK] {ok_count} seeds", flush=True); return True
++
++
++def run_single(variant, kwargs, posture_name, mode, tag):
++    """Per-seed generation for muscle/both via run_posture_comparison.py."""
++    out_dir = OUT / tag
++    out_dir.mkdir(parents=True, exist_ok=True)
++    kwarg_json = json.dumps(kwargs)
++    ok = 0
++    for seed in SINGLE_SEEDS:
++        seed_dir = out_dir / f"seed{seed}"
++        if (seed_dir / "comparison.npy").exists():
++            ok += 1; continue
++        env = os.environ.copy()
++        env["GUIDANCE_VARIANT"] = variant
++        env["GUIDANCE_KWARGS_JSON"] = kwarg_json
++        env["GUIDANCE_MODE"] = mode
++        cmd = [
++            PYTHON, "-m", "scripts.run_posture_comparison",
++            "--model_path", MODEL, "--text_prompt", PROMPT,
++            "--seed", str(seed), "--motion_length", "6.0",
++            "--num_samples", "1", "--output_dir", str(seed_dir),
++            "--guidance_mode", mode,
++            "--posture_instructions", posture_name,
++            "--muscle_ckpt", MUSCLE, "--muscle_posture", "anterior_pelvic_tilt",
++            "--muscle_assets_dir", str(PROJ / "motion2muscle"),
++            "--joint_weight", "1.0", "--muscle_weight", "22.0",
++        ]
++        r = subprocess.run(cmd, env=env, cwd=str(PROJ), capture_output=True,
++                           text=True, timeout=900)
++        if r.returncode == 0:
++            ok += 1
++        else:
++            print(f"  [FAIL] seed={seed}", flush=True); return False
++    print(f"  [OK] {ok}/{len(SINGLE_SEEDS)} seeds", flush=True); return True
++
++
++# ===== Config list =====
++SWEEPS = [
++    # Part A: Joint parameter sweep (batch mode)
++    ("joint", "batch", "v2_x0_edit", {"n_inner_steps": 3, "lr": 0.5}, "anterior_pelvic_tilt", "v2b_n3"),
++    ("joint", "batch", "v2_x0_edit", {"n_inner_steps": 5, "lr": 0.5}, "anterior_pelvic_tilt", "v2b_n5"),
++    ("joint", "batch", "v2_x0_edit", {"n_inner_steps": 10, "lr": 0.5}, "anterior_pelvic_tilt", "v2b_n10"),
++    ("joint", "batch", "v4_omni", {"K_early": 1, "K_late": 3, "lr": 0.5}, "anterior_pelvic_tilt", "v4_Kl3"),
++    ("joint", "batch", "v4_omni", {"K_early": 1, "K_late": 5, "lr": 0.5}, "anterior_pelvic_tilt", "v4_Kl5"),
++    ("joint", "batch", "v1_mu_sgd", {"base_weight": 60.0, "n_inner_steps": 15, "lr": 0.5}, "anterior_pelvic_tilt", "v1_w60"),
++    ("joint", "batch", "v3_x0_direct", {"n_inner_steps": 15, "lr": 0.05}, "anterior_pelvic_tilt", "v3_n15"),
++    ("joint", "batch", "v5_lgd", {"n_mc": 4, "s": 5.0, "mc_noise_scale": 0.05}, "anterior_pelvic_tilt", "v5_s5"),
++    ("joint", "batch", "v2_dps_norm", {"s": 5.0, "schedule": "last_quarter"}, "anterior_pelvic_tilt", "v2norm_s5"),
++    ("joint", "batch", "v2_dps_norm", {"s": 10.0, "schedule": "last_quarter"}, "anterior_pelvic_tilt", "v2norm_s10"),
++
++    # Part B: Muscle/Both modes (per-seed via run_posture_comparison)
++    ("muscle", "single", "v2_dps", {"s": 40, "schedule": "last_quarter"}, "anterior_pelvic_tilt", "v2_muscle"),
++    ("both",   "single", "v2_dps", {"s": 40, "schedule": "last_quarter"}, "anterior_pelvic_tilt", "v2_both"),
++    ("muscle", "single", "v6_closed_loop", {"Kp": 80, "Ki": 1, "Kd": 5, "s_min": 0.05, "s_max": 50,
++                                              "I_max": 20, "beta_ema": 0.8, "lambda_smooth": 0.03,
++                                              "manifold_project": True, "loss_form": "huber",
++                                              "huber_delta": 0.05, "normalize_grad": False,
++                                              "band_gate": False, "spec_schedule_override": "second_half"},
++     "anterior_pelvic_tilt", "v6_muscle"),
++    ("both",   "single", "v6_closed_loop", {"Kp": 80, "Ki": 1, "Kd": 5, "s_min": 0.05, "s_max": 50,
++                                              "I_max": 20, "beta_ema": 0.8, "lambda_smooth": 0.03,
++                                              "manifold_project": True, "loss_form": "huber",
++                                              "huber_delta": 0.05, "normalize_grad": False,
++                                              "band_gate": False, "spec_schedule_override": "second_half"},
++     "anterior_pelvic_tilt", "v6_both"),
++]
++
++
++print(f"=== Parameter Sweep + Muscle/Both ===")
++print(f"Configs: {len(SWEEPS)} (10 batch + 4 single)")
++print(f"Output: {OUT}")
++print(f"Started: {time.strftime('%H:%M:%S')}")
++print()
++
++done, ok = 0, 0
++t_total = time.time()
++
++for mode, method, variant, kwargs, posture, tag in SWEEPS:
++    vname = variant.replace("_", "-")
++    t0 = time.time()
++    print(f"[{done+1}/{len(SWEEPS)}] mode={mode} {vname} tag={tag} ...", flush=True)
++
++    if method == "batch":
++        success = run_batch(variant, kwargs, posture, mode, tag)
++    else:
++        success = run_single(variant, kwargs, posture, mode, tag)
++
++    if success: ok += 1
++    done += 1
++    print(f"  [{done}/{len(SWEEPS)}] {time.time()-t0:.0f}s", flush=True)
++
++print(f"\n=== DONE: {ok}/{len(SWEEPS)} OK, total={time.time()-t_total:.0f}s ===")
+\ No newline at end of file

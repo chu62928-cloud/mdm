@@ -43,6 +43,10 @@ from data_loaders.humanml.scripts.motion_process import get_target_location
 # 新增
 from posture_guidance.controller import PostureGuidance
 from posture_guidance.mdm_integration import apply_posture_guidance
+
+# V7 Auto-DPS (lazy init in p_sample_loop_progressive)
+_V7_CTRL = None
+_V7_CFG = None
 from data_loaders.humanml.scripts.motion_process import recover_from_ric
 
 
@@ -666,16 +670,33 @@ class GaussianDiffusion:
             # POSTURE GUIDANCE — variant dispatch
             # ============================================================
             if use_guidance and guidance is not None:
-                # Compute mu_t from pred_xstart (needed by all variants)
-                mu_t, _, model_log_variance = self.q_posterior_mean_variance(
-                    x_start=out["pred_xstart"],
-                    x_t=img,
-                    t=t,
-                )
-                mu_t = mu_t.contiguous()
+                # ---- V7 Auto-DPS: special branch (replaces full posterior) ----
+                if variant_name == "v7_auto_dps":
+                    self._v7_apply_step(
+                        out=out,
+                        img=img,
+                        t=t,
+                        i=int(i),
+                        T_total=T_total,
+                        model=model,
+                        model_kwargs=model_kwargs,
+                        clip_denoised=clip_denoised,
+                        denoised_fn=denoised_fn,
+                        guidance=guidance,
+                        posture_fk_fn=posture_fk_fn,
+                        variant_kwargs=variant_kwargs,
+                    )
+                else:
+                    # Compute mu_t from pred_xstart (needed by all variants)
+                    mu_t, _, model_log_variance = self.q_posterior_mean_variance(
+                        x_start=out["pred_xstart"],
+                        x_t=img,
+                        t=t,
+                    )
+                    mu_t = mu_t.contiguous()
 
-                # Dispatch by variant
-                mu_t_updated = self._apply_guidance_variant(
+                    # Dispatch by variant
+                    mu_t_updated = self._apply_guidance_variant(
                     variant_name=variant_name,
                     variant_kwargs=variant_kwargs,
                     mu_t=mu_t,
@@ -696,13 +717,13 @@ class GaussianDiffusion:
                     joint_weight=joint_weight,
                     muscle_weight=muscle_weight,
                 )
-
-                # Resample x_{t-1} = mu_t_updated + sigma_t * z
-                noise_z = th.randn_like(mu_t_updated)
-                nonzero_mask = (
+    
+                    # Resample x_{t-1} = mu_t_updated + sigma_t * z
+                    noise_z = th.randn_like(mu_t_updated)
+                    nonzero_mask = (
                     (t != 0).float().view(-1, *([1] * (len(mu_t_updated.shape) - 1)))
-                )
-                out["sample"] = (
+                    )
+                    out["sample"] = (
                     mu_t_updated
                     + nonzero_mask * th.exp(0.5 * model_log_variance) * noise_z
                 )
@@ -723,6 +744,102 @@ class GaussianDiffusion:
                 _json.dump(guidance._conflict_log, _f)
             print(f"[LOG_PRIOR_CONFLICT] saved {len(guidance._conflict_log)} records to {log_path}")
         # =======================================================
+
+
+    # ============================================================
+    # V7 Auto-DPS — special branch helper
+    # ============================================================
+    def _v7_apply_step(
+        self,
+        out,
+        img,
+        t,
+        i,
+        T_total,
+        model,
+        model_kwargs,
+        clip_denoised,
+        denoised_fn,
+        guidance,
+        posture_fk_fn,
+        variant_kwargs,
+    ):
+        """V7 Auto-DPS: replaces full posterior (mean, variance, log_variance, pred_xstart)."""
+        import numpy as np
+        from posture_guidance.auto_dps_controller import (
+            AutoDPSConfig, TrustRegionAutoDPSController,
+        )
+        from posture_guidance.v7_auto_dps import apply_v7_step
+
+        global _V7_CTRL_STATE, _V7_CTRL, _V7_CFG
+
+        B = img.shape[0]
+        device = img.device
+        dtype = img.dtype
+
+        # ---- Lazy init controller ----
+        if _V7_CTRL is None:
+            kw = variant_kwargs if variant_kwargs else {}
+            _V7_CFG = AutoDPSConfig(**kw)
+            _V7_CTRL = TrustRegionAutoDPSController(_V7_CFG)
+            print(f"[V7] Controller init: {_V7_CFG}", flush=True)
+
+        # ---- Reset state at trajectory start ----
+        if i == T_total - 1:
+            _V7_CTRL_STATE = _V7_CTRL.reset(B, device, dtype)
+
+        # ---- predict_fn closure ----
+        def predict_fn(x_candidate):
+            return self.p_mean_variance(
+                model=model, x=x_candidate, t=t,
+                clip_denoised=clip_denoised,
+                denoised_fn=denoised_fn,
+                model_kwargs=model_kwargs,
+            )
+
+        # ---- Noise level ----
+        nl = float(np.sqrt(1.0 - self.alphas_cumprod[i]))
+        noise_level = th.full((B,), nl, device=device, dtype=th.float32)
+
+        # ---- Execute V7 step ----
+        selected_out, diag, _V7_CTRL_STATE = apply_v7_step(
+            x_t=img, t_int=i, t_tensor=t, T_total=T_total,
+            predict_fn=predict_fn, fk_fn=posture_fk_fn,
+            guidance=guidance, controller=_V7_CTRL,
+            controller_state=_V7_CTRL_STATE,
+            noise_level=noise_level, config=_V7_CFG,
+        )
+
+        # ---- Replace full posterior ----
+        out["mean"] = selected_out["mean"]
+        out["variance"] = selected_out["variance"]
+        out["log_variance"] = selected_out["log_variance"]
+        out["pred_xstart"] = selected_out["pred_xstart"]
+
+        # ---- Sample with noise_z (same for accept/reject) ----
+        noise_z = th.randn_like(selected_out["mean"])
+        nonzero_mask = (
+            (t != 0).float().view(-1, *([1] * (len(selected_out["mean"].shape) - 1)))
+        )
+        out["sample"] = (
+            selected_out["mean"]
+            + nonzero_mask * th.exp(0.5 * selected_out["log_variance"]) * noise_z
+        )
+
+        # ---- Trace ----
+        if _V7_CFG.trace and diag.get("accepted", False):
+            r_bef = diag.get('residual_before_deg', 0)
+            d_rms = diag.get('delta_rms', 0)
+            rho_v = diag.get('rho', 0)
+            acc = diag.get('accepted', False)
+            bt = diag.get('backtracks', 0)
+            band = diag.get('in_band', False)
+            print(
+                f'[V7 t={i:3d}] r_before={r_bef:+.1f}deg '
+                f'delta_rms={d_rms:.4f} rho={rho_v:.2f} '
+                f'accepted={acc} bt={bt} band={band}',
+                flush=True,
+            )
 
     # ============================================================
     # Variant dispatch — internal helper

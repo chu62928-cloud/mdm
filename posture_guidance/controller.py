@@ -15,6 +15,10 @@ from .registry import (
     resolve_instruction,
 )
 from .phase_detector import PhaseDetector, PHASE_FUNCTIONS
+from .constraint_measurement import (
+    ConstraintMeasurement,
+    measure_primary_constraint as _measure_primary_constraint,
+)
 
 
 class PostureGuidance:
@@ -124,6 +128,41 @@ class PostureGuidance:
 
         return total_loss
     
+    def measure_primary_constraint(
+        self,
+        q,
+        t: int,
+        T: int,
+        frozen_active_mask = None,
+        frozen_valid_mask = None,
+    ):
+        """Measure the primary constraint for V7 Auto-DPS.
+
+        Finds the spec with is_primary=True and returns a
+        ConstraintMeasurement with per-sample residuals, masks,
+        and validity flags.
+
+        Args:
+            q: (B, N, J, 3) joint coordinates.
+            t, T: current / total diffusion timesteps.
+            frozen_active_mask: reuse mask for trial evaluation.
+            frozen_valid_mask: reuse mask for trial evaluation.
+
+        Returns:
+            ConstraintMeasurement dataclass.
+
+        Raises:
+            ValueError if no primary spec or multiple primary specs exist.
+        """
+        return _measure_primary_constraint(
+            guidance=self,
+            q=q,
+            t=t,
+            T=T,
+            frozen_active_mask=frozen_active_mask,
+            frozen_valid_mask=frozen_valid_mask,
+        )
+
     def set_variant(self, variant: str = "v1_mu_sgd",
                     variant_kwargs: dict = None,
                     diagnostic: bool = False):

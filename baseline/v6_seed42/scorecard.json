@@ -1,0 +1,141 @@
+{
+  "eval_version": "1.0",
+  "timestamp": "2026-07-29T15:41:36.837081",
+  "run_dir": "baseline/v6_seed42",
+  "posture": "anterior_pelvic_tilt",
+  "target": 20.0,
+  "tolerance": 2.0,
+  "direction": "greater_than",
+  "judge_op": "pelvis_tilt",
+  "guidance_op": "pelvis_tilt_angle",
+  "N_seeds": 1,
+  "guidance_mode": "joint",
+  "guidance_config": {
+    "variant": "v6_closed_loop",
+    "variant_kwargs": {
+      "Kp": 80,
+      "Ki": 1,
+      "Kd": 5,
+      "s_min": 0.05,
+      "s_max": 50,
+      "I_max": 20,
+      "beta_ema": 0.8,
+      "lambda_smooth": 0.03,
+      "manifold_project": true,
+      "loss_form": "huber",
+      "huber_delta": 0.05,
+      "normalize_grad": false,
+      "band_gate": false,
+      "spec_schedule_override": "second_half"
+    },
+    "joint_weight": 1.0,
+    "muscle_weight": 1.0
+  },
+  "text_prompt": "a person is walking forward",
+  "control_metrics_aggregated": {
+    "target_hit_band": {
+      "median": 0.6916666666666667,
+      "q1": 0.6916666666666667,
+      "q3": 0.6916666666666667,
+      "iqr": 0.0,
+      "mean": 0.6916666666666667,
+      "std": 0.0,
+      "ci_95_lo": NaN,
+      "ci_95_hi": NaN
+    },
+    "delta": {
+      "median": 26.351940450061594,
+      "q1": 26.351940450061594,
+      "q3": 26.351940450061594,
+      "iqr": 0.0,
+      "mean": 26.351940450061594,
+      "std": 0.0,
+      "ci_95_lo": NaN,
+      "ci_95_hi": NaN
+    },
+    "overshoot": {
+      "median": 0.39118996516186044,
+      "q1": 0.39118996516186044,
+      "q3": 0.39118996516186044,
+      "iqr": 0.0,
+      "mean": 0.39118996516186044,
+      "std": 0.0,
+      "ci_95_lo": NaN,
+      "ci_95_hi": NaN
+    },
+    "temporal_corr": {
+      "median": 0.5708802342414856,
+      "q1": 0.5708802342414856,
+      "q3": 0.5708802342414856,
+      "iqr": 0.0,
+      "mean": 0.5708802342414856,
+      "std": 0.0,
+      "ci_95_lo": NaN,
+      "ci_95_hi": NaN
+    },
+    "phase_selectivity": {
+      "median": 1.0,
+      "q1": 1.0,
+      "q3": 1.0,
+      "iqr": 0.0,
+      "mean": 1.0,
+      "std": 0.0,
+      "ci_95_lo": NaN,
+      "ci_95_hi": NaN
+    },
+    "valid_fraction": {
+      "median": 1.0,
+      "q1": 1.0,
+      "q3": 1.0,
+      "iqr": 0.0,
+      "mean": 1.0,
+      "std": 0.0,
+      "ci_95_lo": NaN,
+      "ci_95_hi": NaN
+    },
+    "foot_skate_baseline": {
+      "median": 0.2773109243697479,
+      "q1": 0.2773109243697479,
+      "q3": 0.2773109243697479,
+      "iqr": 0.0,
+      "mean": 0.2773109243697479,
+      "std": 0.0,
+      "ci_95_lo": NaN,
+      "ci_95_hi": NaN
+    },
+    "foot_skate_guided": {
+      "median": 0.07563025210084033,
+      "q1": 0.07563025210084033,
+      "q3": 0.07563025210084033,
+      "iqr": 0.0,
+      "mean": 0.07563025210084033,
+      "std": 0.0,
+      "ci_95_lo": NaN,
+      "ci_95_hi": NaN
+    },
+    "seed": {
+      "median": 42.0,
+      "q1": 42.0,
+      "q3": 42.0,
+      "iqr": 0.0,
+      "mean": 42.0,
+      "std": 0.0,
+      "ci_95_lo": NaN,
+      "ci_95_hi": NaN
+    }
+  },
+  "per_seed_control": [
+    {
+      "target_hit_band": 0.6916666666666667,
+      "delta": 26.351940450061594,
+      "overshoot": 0.39118996516186044,
+      "temporal_corr": 0.5708802342414856,
+      "phase_selectivity": 1.0,
+      "valid_fraction": 1.0,
+      "foot_skate_baseline": 0.2773109243697479,
+      "foot_skate_guided": 0.07563025210084033,
+      "seed": 42
+    }
+  ],
+  "distribution_metrics": {}
+}
