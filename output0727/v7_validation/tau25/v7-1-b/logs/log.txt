@@ -1,0 +1,93 @@
+[batch] variant=v7_auto_dps  posture=anterior-pelvic-tilt-tau25  seeds=[300, 301, 302, 303, 304, 305, 306, 307, 308, 309, 310, 311]  n=12  out=/root/autodl-tmp/motion-diffusion-model/output0727/v7_validation/tau25/v7-1-b
+Reading ././dataset/humanml_opt.txt
+Loading dataset t2m ...
+[batch] Loading model ...
+TRANS_DEC init
+EMBED TEXT
+Loading BERT...
+loading avg model
+[batch] Model loaded in 5.7s
+>>> p_sample_loop: total_steps=50, num_timesteps=50
+>>> p_sample_loop: total_steps=50, num_timesteps=50
+>>> [posture-guidance] variant=v7_auto_dps
+>>> [posture-guidance] kwargs={'schedule': 'second_half', 'max_backtracks': 3, 'trace': False, 'max_radius_rms': 0.15}
+>>> [posture-guidance] diagnostic=False
+[V7] Controller init: AutoDPSConfig(schedule='second_half', radius_scale=0.05, min_radius_rms=0.0001, max_radius_rms=0.15, damping=1e-08, rho_accept=0.1, rho_shrink=0.25, rho_grow=0.75, shrink_factor=0.5, grow_factor=1.5, max_backtracks=3, band_hysteresis=1.5, min_valid_fraction=0.8, trace=False)
+  [OK] seed=300    (2s)  [1/12]
+>>> p_sample_loop: total_steps=50, num_timesteps=50
+>>> p_sample_loop: total_steps=50, num_timesteps=50
+>>> [posture-guidance] variant=v7_auto_dps
+>>> [posture-guidance] kwargs={'schedule': 'second_half', 'max_backtracks': 3, 'trace': False, 'max_radius_rms': 0.15}
+>>> [posture-guidance] diagnostic=False
+  [OK] seed=301    (2s)  [2/12]
+>>> p_sample_loop: total_steps=50, num_timesteps=50
+>>> p_sample_loop: total_steps=50, num_timesteps=50
+>>> [posture-guidance] variant=v7_auto_dps
+>>> [posture-guidance] kwargs={'schedule': 'second_half', 'max_backtracks': 3, 'trace': False, 'max_radius_rms': 0.15}
+>>> [posture-guidance] diagnostic=False
+  [OK] seed=302    (2s)  [3/12]
+>>> p_sample_loop: total_steps=50, num_timesteps=50
+>>> p_sample_loop: total_steps=50, num_timesteps=50
+>>> [posture-guidance] variant=v7_auto_dps
+>>> [posture-guidance] kwargs={'schedule': 'second_half', 'max_backtracks': 3, 'trace': False, 'max_radius_rms': 0.15}
+>>> [posture-guidance] diagnostic=False
+  [OK] seed=303    (2s)  [4/12]
+>>> p_sample_loop: total_steps=50, num_timesteps=50
+>>> p_sample_loop: total_steps=50, num_timesteps=50
+>>> [posture-guidance] variant=v7_auto_dps
+>>> [posture-guidance] kwargs={'schedule': 'second_half', 'max_backtracks': 3, 'trace': False, 'max_radius_rms': 0.15}
+>>> [posture-guidance] diagnostic=False
+  [OK] seed=304    (2s)  [5/12]
+>>> p_sample_loop: total_steps=50, num_timesteps=50
+>>> p_sample_loop: total_steps=50, num_timesteps=50
+>>> [posture-guidance] variant=v7_auto_dps
+>>> [posture-guidance] kwargs={'schedule': 'second_half', 'max_backtracks': 3, 'trace': False, 'max_radius_rms': 0.15}
+>>> [posture-guidance] diagnostic=False
+  [OK] seed=305    (2s)  [6/12]
+>>> p_sample_loop: total_steps=50, num_timesteps=50
+>>> p_sample_loop: total_steps=50, num_timesteps=50
+>>> [posture-guidance] variant=v7_auto_dps
+>>> [posture-guidance] kwargs={'schedule': 'second_half', 'max_backtracks': 3, 'trace': False, 'max_radius_rms': 0.15}
+>>> [posture-guidance] diagnostic=False
+  [OK] seed=306    (2s)  [7/12]
+>>> p_sample_loop: total_steps=50, num_timesteps=50
+>>> p_sample_loop: total_steps=50, num_timesteps=50
+>>> [posture-guidance] variant=v7_auto_dps
+>>> [posture-guidance] kwargs={'schedule': 'second_half', 'max_backtracks': 3, 'trace': False, 'max_radius_rms': 0.15}
+>>> [posture-guidance] diagnostic=False
+  [OK] seed=307    (2s)  [8/12]
+>>> p_sample_loop: total_steps=50, num_timesteps=50
+>>> p_sample_loop: total_steps=50, num_timesteps=50
+>>> [posture-guidance] variant=v7_auto_dps
+>>> [posture-guidance] kwargs={'schedule': 'second_half', 'max_backtracks': 3, 'trace': False, 'max_radius_rms': 0.15}
+>>> [posture-guidance] diagnostic=False
+  [OK] seed=308    (2s)  [9/12]
+>>> p_sample_loop: total_steps=50, num_timesteps=50
+>>> p_sample_loop: total_steps=50, num_timesteps=50
+>>> [posture-guidance] variant=v7_auto_dps
+>>> [posture-guidance] kwargs={'schedule': 'second_half', 'max_backtracks': 3, 'trace': False, 'max_radius_rms': 0.15}
+>>> [posture-guidance] diagnostic=False
+  [OK] seed=309    (2s)  [10/12]
+>>> p_sample_loop: total_steps=50, num_timesteps=50
+>>> p_sample_loop: total_steps=50, num_timesteps=50
+>>> [posture-guidance] variant=v7_auto_dps
+>>> [posture-guidance] kwargs={'schedule': 'second_half', 'max_backtracks': 3, 'trace': False, 'max_radius_rms': 0.15}
+>>> [posture-guidance] diagnostic=False
+  [OK] seed=310    (2s)  [11/12]
+>>> p_sample_loop: total_steps=50, num_timesteps=50
+>>> p_sample_loop: total_steps=50, num_timesteps=50
+>>> [posture-guidance] variant=v7_auto_dps
+>>> [posture-guidance] kwargs={'schedule': 'second_half', 'max_backtracks': 3, 'trace': False, 'max_radius_rms': 0.15}
+>>> [posture-guidance] diagnostic=False
+  [OK] seed=311    (2s)  [12/12]
+[batch] DONE: 12/12 seeds OK, failed/skipped=0
+
+=== STDERR ===
+/root/autodl-tmp/motion-diffusion-model/diffusion/nn.py:151: FutureWarning: `torch.cuda.amp.custom_fwd(args...)` is deprecated. Please use `torch.amp.custom_fwd(args..., device_type='cuda')` instead.
+  def forward(ctx, run_function, length, *args):
+/root/autodl-tmp/motion-diffusion-model/diffusion/nn.py:161: FutureWarning: `torch.cuda.amp.custom_bwd(args...)` is deprecated. Please use `torch.amp.custom_bwd(args..., device_type='cuda')` instead.
+  def backward(ctx, *output_grads):
+
+  0%|          | 0/4384 [00:00<?, ?it/s]
+ 98%|█████████▊| 4298/4384 [00:00<00:00, 42975.12it/s]
+100%|██████████| 4384/4384 [00:00<00:00, 42903.17it/s]

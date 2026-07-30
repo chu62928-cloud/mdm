@@ -1,0 +1,412 @@
+{
+  "tau05": {
+    "hit_band_v7_vs_v2": {
+      "observed_diff": -0.05944444444444445,
+      "ci_95": [
+        -0.17055555555555552,
+        0.05389583333333322
+      ],
+      "p_value": 0.5118,
+      "n_pairs": 30,
+      "significant_at_05": false
+    },
+    "hit_band_v7_vs_v6": {
+      "observed_diff": -0.12111111111111113,
+      "ci_95": [
+        -0.2186111111111111,
+        -0.018055555555555564
+      ],
+      "p_value": 0.4901,
+      "n_pairs": 30,
+      "significant_at_05": false
+    },
+    "delta_v7_vs_v2": {
+      "observed_diff": -1.1541600440930266,
+      "ci_95": [
+        -1.8448009157535952,
+        -0.46235919998275954
+      ],
+      "p_value": 0.5102,
+      "n_pairs": 30,
+      "significant_at_05": false
+    },
+    "delta_v7_vs_v6": {
+      "observed_diff": -0.21131888122156597,
+      "ci_95": [
+        -0.9912181555023519,
+        0.5400677121622361
+      ],
+      "p_value": 0.6396,
+      "n_pairs": 30,
+      "significant_at_05": false
+    },
+    "overshoot_v7_vs_v2": {
+      "observed_diff": -0.4424005979109321,
+      "ci_95": [
+        -0.9937954726148891,
+        0.0927308745945153
+      ],
+      "p_value": 0.5146,
+      "n_pairs": 30,
+      "significant_at_05": false
+    },
+    "overshoot_v7_vs_v6": {
+      "observed_diff": 0.4009423379160649,
+      "ci_95": [
+        -0.15580001173598745,
+        0.938149876496869
+      ],
+      "p_value": 0.495,
+      "n_pairs": 30,
+      "significant_at_05": false
+    },
+    "temporal_corr_v7_vs_v2": {
+      "observed_diff": 0.1442010775829355,
+      "ci_95": [
+        0.029746147075978422,
+        0.25405420547506463
+      ],
+      "p_value": 0.503,
+      "n_pairs": 30,
+      "significant_at_05": false
+    },
+    "temporal_corr_v7_vs_v6": {
+      "observed_diff": 0.16136147758613031,
+      "ci_95": [
+        0.05303578590508551,
+        0.2653708703846981
+      ],
+      "p_value": 0.5051,
+      "n_pairs": 30,
+      "significant_at_05": false
+    }
+  },
+  "tau10": {
+    "hit_band_v7_vs_v2": {
+      "observed_diff": -0.08333333333333333,
+      "ci_95": [
+        -0.18834027777777781,
+        0.026402777777777574
+      ],
+      "p_value": 0.4989,
+      "n_pairs": 30,
+      "significant_at_05": false
+    },
+    "hit_band_v7_vs_v6": {
+      "observed_diff": -0.1522222222222222,
+      "ci_95": [
+        -0.24638888888888888,
+        -0.0525
+      ],
+      "p_value": 0.5062,
+      "n_pairs": 30,
+      "significant_at_05": false
+    },
+    "delta_v7_vs_v2": {
+      "observed_diff": -0.9110638500535839,
+      "ci_95": [
+        -1.5091869407268785,
+        -0.3432258523110722
+      ],
+      "p_value": 0.4933,
+      "n_pairs": 30,
+      "significant_at_05": false
+    },
+    "delta_v7_vs_v6": {
+      "observed_diff": -0.5475035811635052,
+      "ci_95": [
+        -1.1807239660095776,
+        0.053387076548268846
+      ],
+      "p_value": 0.4899,
+      "n_pairs": 30,
+      "significant_at_05": false
+    },
+    "overshoot_v7_vs_v2": {
+      "observed_diff": -0.020438707299999265,
+      "ci_95": [
+        -0.4187640223430897,
+        0.353257550633783
+      ],
+      "p_value": 0.9187,
+      "n_pairs": 30,
+      "significant_at_05": false
+    },
+    "overshoot_v7_vs_v6": {
+      "observed_diff": 0.28204458707574864,
+      "ci_95": [
+        -0.12455110479453876,
+        0.679501532665003
+      ],
+      "p_value": 0.5113,
+      "n_pairs": 30,
+      "significant_at_05": false
+    },
+    "temporal_corr_v7_vs_v2": {
+      "observed_diff": 0.14763080364403625,
+      "ci_95": [
+        0.042120985596751176,
+        0.2512442624910424
+      ],
+      "p_value": 0.5016,
+      "n_pairs": 30,
+      "significant_at_05": false
+    },
+    "temporal_corr_v7_vs_v6": {
+      "observed_diff": 0.19476246299842995,
+      "ci_95": [
+        0.08742099156913659,
+        0.2979429806427409
+      ],
+      "p_value": 0.507,
+      "n_pairs": 30,
+      "significant_at_05": false
+    }
+  },
+  "tau15": {
+    "hit_band_v7_vs_v2": {
+      "observed_diff": -0.2752777777777778,
+      "ci_95": [
+        -0.3747222222222222,
+        -0.17722222222222225
+      ],
+      "p_value": 0.4956,
+      "n_pairs": 30,
+      "significant_at_05": false
+    },
+    "hit_band_v7_vs_v6": {
+      "observed_diff": -0.2913888888888889,
+      "ci_95": [
+        -0.3875,
+        -0.1938819444444445
+      ],
+      "p_value": 0.4988,
+      "n_pairs": 30,
+      "significant_at_05": false
+    },
+    "delta_v7_vs_v2": {
+      "observed_diff": -1.2214303780146314,
+      "ci_95": [
+        -1.6892405399535217,
+        -0.7575394184642644
+      ],
+      "p_value": 0.4959,
+      "n_pairs": 30,
+      "significant_at_05": false
+    },
+    "delta_v7_vs_v6": {
+      "observed_diff": -0.7191402016721585,
+      "ci_95": [
+        -1.247875912831481,
+        -0.18683332895120713
+      ],
+      "p_value": 0.4994,
+      "n_pairs": 30,
+      "significant_at_05": false
+    },
+    "overshoot_v7_vs_v2": {
+      "observed_diff": 0.7581518876832194,
+      "ci_95": [
+        0.3821120092786204,
+        1.138474729867455
+      ],
+      "p_value": 0.4994,
+      "n_pairs": 30,
+      "significant_at_05": false
+    },
+    "overshoot_v7_vs_v6": {
+      "observed_diff": 0.8238188328024048,
+      "ci_95": [
+        0.4899847867672704,
+        1.1621271657047163
+      ],
+      "p_value": 0.4972,
+      "n_pairs": 30,
+      "significant_at_05": false
+    },
+    "temporal_corr_v7_vs_v2": {
+      "observed_diff": 0.2232981527845065,
+      "ci_95": [
+        0.11114771356806159,
+        0.33588552789141735
+      ],
+      "p_value": 0.491,
+      "n_pairs": 30,
+      "significant_at_05": false
+    },
+    "temporal_corr_v7_vs_v6": {
+      "observed_diff": 0.21704751439392567,
+      "ci_95": [
+        0.10719364303164185,
+        0.32421565002761776
+      ],
+      "p_value": 0.5062,
+      "n_pairs": 30,
+      "significant_at_05": false
+    }
+  },
+  "tau20": {
+    "hit_band_v7_vs_v2": {
+      "observed_diff": -0.4586111111111111,
+      "ci_95": [
+        -0.5672222222222222,
+        -0.3472222222222223
+      ],
+      "p_value": 0.5031,
+      "n_pairs": 30,
+      "significant_at_05": false
+    },
+    "hit_band_v7_vs_v6": {
+      "observed_diff": -0.25277777777777777,
+      "ci_95": [
+        -0.39305555555555555,
+        -0.09916666666666667
+      ],
+      "p_value": 0.5024,
+      "n_pairs": 30,
+      "significant_at_05": false
+    },
+    "delta_v7_vs_v2": {
+      "observed_diff": -1.556766370033952,
+      "ci_95": [
+        -2.073715017413952,
+        -1.0541628758387782
+      ],
+      "p_value": 0.5017,
+      "n_pairs": 30,
+      "significant_at_05": false
+    },
+    "delta_v7_vs_v6": {
+      "observed_diff": -0.5926112318888873,
+      "ci_95": [
+        -1.1846178796226987,
+        0.028305433747657947
+      ],
+      "p_value": 0.4996,
+      "n_pairs": 30,
+      "significant_at_05": false
+    },
+    "overshoot_v7_vs_v2": {
+      "observed_diff": 1.3396071698605296,
+      "ci_95": [
+        0.8713462146858962,
+        1.8169936243502307
+      ],
+      "p_value": 0.4954,
+      "n_pairs": 30,
+      "significant_at_05": false
+    },
+    "overshoot_v7_vs_v6": {
+      "observed_diff": 0.6624202980088868,
+      "ci_95": [
+        0.1028009909615546,
+        1.2188058441283733
+      ],
+      "p_value": 0.4963,
+      "n_pairs": 30,
+      "significant_at_05": false
+    },
+    "temporal_corr_v7_vs_v2": {
+      "observed_diff": 0.3045890998095274,
+      "ci_95": [
+        0.20964475920734305,
+        0.3990123976115136
+      ],
+      "p_value": 0.4989,
+      "n_pairs": 30,
+      "significant_at_05": false
+    },
+    "temporal_corr_v7_vs_v6": {
+      "observed_diff": 0.20970216672867537,
+      "ci_95": [
+        0.09360129538768283,
+        0.32654478742430604
+      ],
+      "p_value": 0.506,
+      "n_pairs": 30,
+      "significant_at_05": false
+    }
+  },
+  "tau25": {
+    "hit_band_v7_vs_v2": {
+      "observed_diff": -0.485,
+      "ci_95": [
+        -0.5983333333333332,
+        -0.37000000000000005
+      ],
+      "p_value": 0.5043,
+      "n_pairs": 30,
+      "significant_at_05": false
+    },
+    "hit_band_v7_vs_v6": {
+      "observed_diff": -0.14305555555555555,
+      "ci_95": [
+        -0.2797291666666667,
+        0.002499999999999995
+      ],
+      "p_value": 0.4955,
+      "n_pairs": 30,
+      "significant_at_05": false
+    },
+    "delta_v7_vs_v2": {
+      "observed_diff": -1.7568324576796792,
+      "ci_95": [
+        -2.285398533976182,
+        -1.2441625026196936
+      ],
+      "p_value": 0.4985,
+      "n_pairs": 30,
+      "significant_at_05": false
+    },
+    "delta_v7_vs_v6": {
+      "observed_diff": -0.15779251007995518,
+      "ci_95": [
+        -0.7907537504341372,
+        0.4857449423863565
+      ],
+      "p_value": 0.664,
+      "n_pairs": 30,
+      "significant_at_05": false
+    },
+    "overshoot_v7_vs_v2": {
+      "observed_diff": 1.5189219234866347,
+      "ci_95": [
+        1.0043138824351092,
+        2.044076256996231
+      ],
+      "p_value": 0.4946,
+      "n_pairs": 30,
+      "significant_at_05": false
+    },
+    "overshoot_v7_vs_v6": {
+      "observed_diff": 0.11658849165369282,
+      "ci_95": [
+        -0.5092590981393543,
+        0.7212052661561659
+      ],
+      "p_value": 0.7341,
+      "n_pairs": 30,
+      "significant_at_05": false
+    },
+    "temporal_corr_v7_vs_v2": {
+      "observed_diff": 0.3811072596659263,
+      "ci_95": [
+        0.2919222084215532,
+        0.46792106625468777
+      ],
+      "p_value": 0.5056,
+      "n_pairs": 30,
+      "significant_at_05": false
+    },
+    "temporal_corr_v7_vs_v6": {
+      "observed_diff": 0.1926671888679266,
+      "ci_95": [
+        0.08344968625654778,
+        0.30580763759712376
+      ],
+      "p_value": 0.5041,
+      "n_pairs": 30,
+      "significant_at_05": false
+    }
+  }
+}

@@ -1,0 +1,228 @@
+[batch] variant=v2_dps  posture=anterior-pelvic-tilt-tau25  seeds=[300, 301, 302, 303, 304, 305, 306, 307, 308, 309, 310, 311]  n=12  out=/root/autodl-tmp/motion-diffusion-model/output0727/v7_validation/tau25/v2
+Reading ././dataset/humanml_opt.txt
+Loading dataset t2m ...
+[batch] Loading model ...
+TRANS_DEC init
+EMBED TEXT
+Loading BERT...
+loading avg model
+[batch] Model loaded in 7.8s
+>>> p_sample_loop: total_steps=50, num_timesteps=50
+>>> p_sample_loop: total_steps=50, num_timesteps=50
+>>> [posture-guidance] variant=v2_dps
+>>> [posture-guidance] kwargs={'s': 40, 'schedule': 'last_quarter'}
+>>> [posture-guidance] diagnostic=False
+[V2 UPDATE t= 11] loss=11.4878  grad_norm=0.20158  |s*grad|=8.0631  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t= 10] loss=9.7747  grad_norm=0.22560  |s*grad|=9.0239  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  9] loss=7.7443  grad_norm=0.23467  |s*grad|=9.3868  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  8] loss=5.7166  grad_norm=0.22492  |s*grad|=8.9969  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  7] loss=3.8959  grad_norm=0.21238  |s*grad|=8.4951  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  6] loss=2.2169  grad_norm=0.20754  |s*grad|=8.3015  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  5] loss=0.7341  grad_norm=0.15388  |s*grad|=6.1553  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  4] loss=0.1485  grad_norm=0.06966  |s*grad|=2.7865  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  3] loss=0.0374  grad_norm=0.03230  |s*grad|=1.2918  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  2] loss=0.0245  grad_norm=0.03911  |s*grad|=1.5644  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  1] loss=0.0082  grad_norm=0.03467  |s*grad|=1.3869  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  0] loss=0.0096  grad_norm=0.04535  |s*grad|=1.8140  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+  [OK] seed=300    (1s)  [1/12]
+>>> p_sample_loop: total_steps=50, num_timesteps=50
+>>> p_sample_loop: total_steps=50, num_timesteps=50
+>>> [posture-guidance] variant=v2_dps
+>>> [posture-guidance] kwargs={'s': 40, 'schedule': 'last_quarter'}
+>>> [posture-guidance] diagnostic=False
+[V2 UPDATE t= 11] loss=11.4367  grad_norm=0.21413  |s*grad|=8.5651  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t= 10] loss=9.6964  grad_norm=0.22722  |s*grad|=9.0887  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  9] loss=7.7069  grad_norm=0.23943  |s*grad|=9.5772  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  8] loss=5.6090  grad_norm=0.22570  |s*grad|=9.0282  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  7] loss=3.7288  grad_norm=0.21219  |s*grad|=8.4877  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  6] loss=2.0621  grad_norm=0.20847  |s*grad|=8.3386  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  5] loss=0.5757  grad_norm=0.16073  |s*grad|=6.4291  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  4] loss=0.0101  grad_norm=0.01825  |s*grad|=0.7300  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  3] loss=0.0037  grad_norm=0.01527  |s*grad|=0.6107  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  2] loss=0.0078  grad_norm=0.05999  |s*grad|=2.3996  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  0] loss=0.0897  grad_norm=0.13774  |s*grad|=5.5095  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+  [OK] seed=301    (1s)  [2/12]
+>>> p_sample_loop: total_steps=50, num_timesteps=50
+>>> p_sample_loop: total_steps=50, num_timesteps=50
+>>> [posture-guidance] variant=v2_dps
+>>> [posture-guidance] kwargs={'s': 40, 'schedule': 'last_quarter'}
+>>> [posture-guidance] diagnostic=False
+[V2 UPDATE t= 11] loss=11.1063  grad_norm=0.21682  |s*grad|=8.6726  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t= 10] loss=9.3085  grad_norm=0.23246  |s*grad|=9.2983  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  9] loss=7.3007  grad_norm=0.24382  |s*grad|=9.7529  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  8] loss=5.1236  grad_norm=0.22580  |s*grad|=9.0321  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  7] loss=3.2514  grad_norm=0.21213  |s*grad|=8.4854  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  6] loss=1.6486  grad_norm=0.17823  |s*grad|=7.1294  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  5] loss=0.6424  grad_norm=0.12810  |s*grad|=5.1239  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  4] loss=0.1988  grad_norm=0.07245  |s*grad|=2.8980  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  3] loss=0.0614  grad_norm=0.05012  |s*grad|=2.0049  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  2] loss=0.0200  grad_norm=0.04733  |s*grad|=1.8932  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  1] loss=0.0035  grad_norm=0.02004  |s*grad|=0.8016  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  0] loss=0.0583  grad_norm=0.10096  |s*grad|=4.0385  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+  [OK] seed=302    (1s)  [3/12]
+>>> p_sample_loop: total_steps=50, num_timesteps=50
+>>> p_sample_loop: total_steps=50, num_timesteps=50
+>>> [posture-guidance] variant=v2_dps
+>>> [posture-guidance] kwargs={'s': 40, 'schedule': 'last_quarter'}
+>>> [posture-guidance] diagnostic=False
+[V2 UPDATE t= 11] loss=9.4566  grad_norm=0.23253  |s*grad|=9.3011  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t= 10] loss=7.2925  grad_norm=0.24375  |s*grad|=9.7498  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  9] loss=5.0621  grad_norm=0.22444  |s*grad|=8.9775  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  8] loss=3.2229  grad_norm=0.21230  |s*grad|=8.4919  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  7] loss=1.5254  grad_norm=0.20951  |s*grad|=8.3803  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  6] loss=0.3222  grad_norm=0.11986  |s*grad|=4.7944  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  5] loss=0.0199  grad_norm=0.02716  |s*grad|=1.0866  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  4] loss=0.0061  grad_norm=0.02115  |s*grad|=0.8460  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  3] loss=0.0021  grad_norm=0.02288  |s*grad|=0.9154  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  2] loss=0.0033  grad_norm=0.01770  |s*grad|=0.7078  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  1] loss=0.0248  grad_norm=0.08615  |s*grad|=3.4461  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+  [OK] seed=303    (1s)  [4/12]
+>>> p_sample_loop: total_steps=50, num_timesteps=50
+>>> p_sample_loop: total_steps=50, num_timesteps=50
+>>> [posture-guidance] variant=v2_dps
+>>> [posture-guidance] kwargs={'s': 40, 'schedule': 'last_quarter'}
+>>> [posture-guidance] diagnostic=False
+[V2 UPDATE t= 11] loss=11.8082  grad_norm=0.20558  |s*grad|=8.2232  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t= 10] loss=10.1807  grad_norm=0.20658  |s*grad|=8.2634  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  9] loss=8.4533  grad_norm=0.22625  |s*grad|=9.0501  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  8] loss=6.5312  grad_norm=0.23205  |s*grad|=9.2819  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  7] loss=4.5517  grad_norm=0.21990  |s*grad|=8.7962  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  6] loss=2.7419  grad_norm=0.21224  |s*grad|=8.4898  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  5] loss=1.1876  grad_norm=0.16595  |s*grad|=6.6381  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  4] loss=0.2952  grad_norm=0.11436  |s*grad|=4.5744  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  3] loss=0.0073  grad_norm=0.02571  |s*grad|=1.0284  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  1] loss=0.0191  grad_norm=0.05137  |s*grad|=2.0546  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+  [OK] seed=304    (1s)  [5/12]
+>>> p_sample_loop: total_steps=50, num_timesteps=50
+>>> p_sample_loop: total_steps=50, num_timesteps=50
+>>> [posture-guidance] variant=v2_dps
+>>> [posture-guidance] kwargs={'s': 40, 'schedule': 'last_quarter'}
+>>> [posture-guidance] diagnostic=False
+[V2 UPDATE t= 11] loss=11.3348  grad_norm=0.18647  |s*grad|=7.4589  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t= 10] loss=9.9540  grad_norm=0.22108  |s*grad|=8.8432  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  9] loss=8.1080  grad_norm=0.23646  |s*grad|=9.4584  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  8] loss=6.0955  grad_norm=0.23040  |s*grad|=9.2161  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  7] loss=4.2359  grad_norm=0.20910  |s*grad|=8.3639  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  6] loss=2.6446  grad_norm=0.20472  |s*grad|=8.1890  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  5] loss=1.1103  grad_norm=0.19220  |s*grad|=7.6879  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  4] loss=0.2312  grad_norm=0.07530  |s*grad|=3.0120  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  3] loss=0.0776  grad_norm=0.04480  |s*grad|=1.7922  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  2] loss=0.0358  grad_norm=0.03337  |s*grad|=1.3346  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  1] loss=0.0236  grad_norm=0.03306  |s*grad|=1.3224  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  0] loss=0.0357  grad_norm=0.08275  |s*grad|=3.3100  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+  [OK] seed=305    (1s)  [6/12]
+>>> p_sample_loop: total_steps=50, num_timesteps=50
+>>> p_sample_loop: total_steps=50, num_timesteps=50
+>>> [posture-guidance] variant=v2_dps
+>>> [posture-guidance] kwargs={'s': 40, 'schedule': 'last_quarter'}
+>>> [posture-guidance] diagnostic=False
+[V2 UPDATE t= 11] loss=11.4292  grad_norm=0.22495  |s*grad|=8.9980  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t= 10] loss=9.4725  grad_norm=0.24158  |s*grad|=9.6633  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  9] loss=7.2392  grad_norm=0.24924  |s*grad|=9.9698  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  8] loss=4.8980  grad_norm=0.23337  |s*grad|=9.3350  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  7] loss=2.9070  grad_norm=0.21783  |s*grad|=8.7130  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  6] loss=1.1543  grad_norm=0.20360  |s*grad|=8.1441  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  5] loss=0.0795  grad_norm=0.05612  |s*grad|=2.2448  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  4] loss=0.0080  grad_norm=0.02589  |s*grad|=1.0356  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  3] loss=0.0003  grad_norm=0.00375  |s*grad|=0.1500  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  2] loss=0.0055  grad_norm=0.02421  |s*grad|=0.9686  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  1] loss=0.0386  grad_norm=0.07789  |s*grad|=3.1154  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  0] loss=0.0023  grad_norm=0.01629  |s*grad|=0.6515  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+  [OK] seed=306    (1s)  [7/12]
+>>> p_sample_loop: total_steps=50, num_timesteps=50
+>>> p_sample_loop: total_steps=50, num_timesteps=50
+>>> [posture-guidance] variant=v2_dps
+>>> [posture-guidance] kwargs={'s': 40, 'schedule': 'last_quarter'}
+>>> [posture-guidance] diagnostic=False
+[V2 UPDATE t= 11] loss=11.1296  grad_norm=0.22493  |s*grad|=8.9971  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t= 10] loss=9.2147  grad_norm=0.23473  |s*grad|=9.3893  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  9] loss=7.1408  grad_norm=0.24439  |s*grad|=9.7755  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  8] loss=4.9588  grad_norm=0.23267  |s*grad|=9.3068  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  7] loss=2.9907  grad_norm=0.21888  |s*grad|=8.7552  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  6] loss=1.2610  grad_norm=0.19681  |s*grad|=7.8723  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  5] loss=0.2243  grad_norm=0.10723  |s*grad|=4.2890  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  4] loss=0.0066  grad_norm=0.01559  |s*grad|=0.6234  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  3] loss=0.0035  grad_norm=0.02147  |s*grad|=0.8589  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  1] loss=0.0152  grad_norm=0.04045  |s*grad|=1.6181  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  0] loss=0.0000  grad_norm=0.00346  |s*grad|=0.1386  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+  [OK] seed=307    (1s)  [8/12]
+>>> p_sample_loop: total_steps=50, num_timesteps=50
+>>> p_sample_loop: total_steps=50, num_timesteps=50
+>>> [posture-guidance] variant=v2_dps
+>>> [posture-guidance] kwargs={'s': 40, 'schedule': 'last_quarter'}
+>>> [posture-guidance] diagnostic=False
+[V2 UPDATE t= 11] loss=12.6888  grad_norm=0.22658  |s*grad|=9.0630  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t= 10] loss=10.8853  grad_norm=0.20698  |s*grad|=8.2793  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  9] loss=9.2667  grad_norm=0.21477  |s*grad|=8.5909  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  8] loss=7.5066  grad_norm=0.22908  |s*grad|=9.1634  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  7] loss=5.6357  grad_norm=0.22156  |s*grad|=8.8623  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  6] loss=3.8574  grad_norm=0.21131  |s*grad|=8.4524  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  5] loss=2.2918  grad_norm=0.20629  |s*grad|=8.2516  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  4] loss=0.8739  grad_norm=0.15812  |s*grad|=6.3250  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  3] loss=0.1952  grad_norm=0.08673  |s*grad|=3.4692  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  2] loss=0.0443  grad_norm=0.04591  |s*grad|=1.8366  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  1] loss=0.0285  grad_norm=0.05311  |s*grad|=2.1242  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  0] loss=0.0219  grad_norm=0.06585  |s*grad|=2.6338  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+  [OK] seed=308    (1s)  [9/12]
+>>> p_sample_loop: total_steps=50, num_timesteps=50
+>>> p_sample_loop: total_steps=50, num_timesteps=50
+>>> [posture-guidance] variant=v2_dps
+>>> [posture-guidance] kwargs={'s': 40, 'schedule': 'last_quarter'}
+>>> [posture-guidance] diagnostic=False
+[V2 UPDATE t= 11] loss=13.0112  grad_norm=0.22088  |s*grad|=8.8353  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t= 10] loss=11.1955  grad_norm=0.21526  |s*grad|=8.6105  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  9] loss=9.4506  grad_norm=0.22304  |s*grad|=8.9214  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  8] loss=7.4725  grad_norm=0.23681  |s*grad|=9.4725  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  7] loss=5.3739  grad_norm=0.22851  |s*grad|=9.1405  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  6] loss=3.4471  grad_norm=0.21997  |s*grad|=8.7988  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  5] loss=1.6985  grad_norm=0.21712  |s*grad|=8.6847  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  4] loss=0.4155  grad_norm=0.11881  |s*grad|=4.7523  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  3] loss=0.0658  grad_norm=0.05918  |s*grad|=2.3671  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  2] loss=0.0002  grad_norm=0.00771  |s*grad|=0.3086  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  1] loss=0.0118  grad_norm=0.03857  |s*grad|=1.5426  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  0] loss=0.0001  grad_norm=0.00372  |s*grad|=0.1490  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+  [OK] seed=309    (1s)  [10/12]
+>>> p_sample_loop: total_steps=50, num_timesteps=50
+>>> p_sample_loop: total_steps=50, num_timesteps=50
+>>> [posture-guidance] variant=v2_dps
+>>> [posture-guidance] kwargs={'s': 40, 'schedule': 'last_quarter'}
+>>> [posture-guidance] diagnostic=False
+[V2 UPDATE t= 11] loss=11.5196  grad_norm=0.21466  |s*grad|=8.5864  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t= 10] loss=9.7096  grad_norm=0.22866  |s*grad|=9.1464  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  9] loss=7.6482  grad_norm=0.24767  |s*grad|=9.9067  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  8] loss=5.3709  grad_norm=0.23145  |s*grad|=9.2578  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  7] loss=3.3900  grad_norm=0.21655  |s*grad|=8.6621  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  6] loss=1.6375  grad_norm=0.20618  |s*grad|=8.2472  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  5] loss=0.4558  grad_norm=0.10608  |s*grad|=4.2433  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  4] loss=0.1219  grad_norm=0.05382  |s*grad|=2.1527  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  3] loss=0.0561  grad_norm=0.03416  |s*grad|=1.3665  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  2] loss=0.0309  grad_norm=0.03292  |s*grad|=1.3170  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  1] loss=0.0143  grad_norm=0.02620  |s*grad|=1.0479  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  0] loss=0.0298  grad_norm=0.06457  |s*grad|=2.5829  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+  [OK] seed=310    (1s)  [11/12]
+>>> p_sample_loop: total_steps=50, num_timesteps=50
+>>> p_sample_loop: total_steps=50, num_timesteps=50
+>>> [posture-guidance] variant=v2_dps
+>>> [posture-guidance] kwargs={'s': 40, 'schedule': 'last_quarter'}
+>>> [posture-guidance] diagnostic=False
+[V2 UPDATE t= 11] loss=11.1838  grad_norm=0.21776  |s*grad|=8.7104  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t= 10] loss=9.4033  grad_norm=0.23318  |s*grad|=9.3273  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  9] loss=7.3179  grad_norm=0.25576  |s*grad|=10.2304  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  8] loss=4.9723  grad_norm=0.23806  |s*grad|=9.5222  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  7] loss=2.9239  grad_norm=0.22368  |s*grad|=8.9471  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  6] loss=1.0825  grad_norm=0.20443  |s*grad|=8.1773  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  5] loss=0.0709  grad_norm=0.06793  |s*grad|=2.7173  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  3] loss=0.0044  grad_norm=0.02090  |s*grad|=0.8362  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+[V2 UPDATE t=  1] loss=0.0270  grad_norm=0.06711  |s*grad|=2.6842  s_eff=40.00  loss_form=hinge  sigma_sched=constant  mproj=False
+  [OK] seed=311    (1s)  [12/12]
+[batch] DONE: 12/12 seeds OK, failed/skipped=0
+
+=== STDERR ===
+/root/autodl-tmp/motion-diffusion-model/diffusion/nn.py:151: FutureWarning: `torch.cuda.amp.custom_fwd(args...)` is deprecated. Please use `torch.amp.custom_fwd(args..., device_type='cuda')` instead.
+  def forward(ctx, run_function, length, *args):
+/root/autodl-tmp/motion-diffusion-model/diffusion/nn.py:161: FutureWarning: `torch.cuda.amp.custom_bwd(args...)` is deprecated. Please use `torch.amp.custom_bwd(args..., device_type='cuda')` instead.
+  def backward(ctx, *output_grads):
+
+  0%|          | 0/4384 [00:00<?, ?it/s]
+ 98%|█████████▊| 4278/4384 [00:00<00:00, 42770.66it/s]
+100%|██████████| 4384/4384 [00:00<00:00, 42743.41it/s]
