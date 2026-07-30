@@ -182,12 +182,13 @@ def apply_v7_step(
     # ---- FIX (Branch C): Update band state BEFORE proposal ----
     # Previously this was at Step 6 (after proposal), causing stale in_band
     # to block proposals even when residual had drifted out of tolerance.
-    was_in_band = controller_state.in_band.clone()
-    controller_state = controller.update_band_state(
-        controller_state, residual_before, measurement.tolerance
-    )
-    diag["band_just_entered"] = (controller_state.in_band & ~was_in_band).any().item()
-    diag["band_just_exited"] = (~controller_state.in_band & was_in_band).any().item()
+    if not cfg.band_order_bug:
+        was_in_band = controller_state.in_band.clone()
+        controller_state = controller.update_band_state(
+            controller_state, residual_before, measurement.tolerance
+        )
+        diag["band_just_entered"] = (controller_state.in_band & ~was_in_band).any().item()
+        diag["band_just_exited"] = (~controller_state.in_band & was_in_band).any().item()
 
     if not valid_measurement.any():
         diag["proposal_skip_reason"] = "measurement_invalid"
@@ -245,54 +246,67 @@ def apply_v7_step(
     trial_residual = residual_before.clone()
     n_proposals_evaluated = 0
 
-    for backtrack in range(cfg.max_backtracks + 1):
-        needs_trial = current_proposal.valid & ~accepted
-        if not needs_trial.any():
-            break
-
-        x_t_trial = x_t.detach() + current_proposal.delta
-        trial_mask = needs_trial.view(B, 1, 1, 1)
-        x_t_trial = torch.where(trial_mask, x_t_trial, x_t.detach())
-
+    if cfg.disable_trial:
+        # Ablation: accept all valid proposals without candidate evaluation
+        x_t_trial = x_t.detach() + proposal.delta
+        valid_mask = proposal.valid.view(B, 1, 1, 1)
+        x_t_trial = torch.where(valid_mask, x_t_trial, x_t.detach())
         with torch.no_grad():
             out_trial = predict_fn(x_t_trial)
-            q_trial = fk_fn(out_trial["pred_xstart"])
-            measurement_trial = guidance.measure_primary_constraint(
-                q_trial, t_int, T_total,
-                frozen_active_mask=frozen_active_mask,
-                frozen_valid_mask=frozen_valid_mask,
+        accepted = proposal.valid.clone()
+        rho = torch.ones(B, device=device, dtype=torch.float32)
+        diag["backtracks"] = 0
+        diag["extra_forwards"] = int(proposal.valid.sum().item())
+        diag["accepted_proposal_count"] = int(accepted.sum().item())
+    else:
+        for backtrack in range(cfg.max_backtracks + 1):
+            needs_trial = current_proposal.valid & ~accepted
+            if not needs_trial.any():
+                break
+
+            x_t_trial = x_t.detach() + current_proposal.delta
+            trial_mask = needs_trial.view(B, 1, 1, 1)
+            x_t_trial = torch.where(trial_mask, x_t_trial, x_t.detach())
+
+            with torch.no_grad():
+                out_trial = predict_fn(x_t_trial)
+                q_trial = fk_fn(out_trial["pred_xstart"])
+                measurement_trial = guidance.measure_primary_constraint(
+                    q_trial, t_int, T_total,
+                    frozen_active_mask=frozen_active_mask,
+                    frozen_valid_mask=frozen_valid_mask,
+                )
+
+            trial_residual = measurement_trial.summary_residual
+            valid_trial = (
+                torch.isfinite(trial_residual)
+                & (measurement_trial.effective_count > 0)
             )
 
-        trial_residual = measurement_trial.summary_residual
-        valid_trial = (
-            torch.isfinite(trial_residual)
-            & (measurement_trial.effective_count > 0)
-        )
+            step_accepted, step_rho, step_reason = controller.check_acceptance(
+                residual_before, trial_residual,
+                current_proposal.predicted_reduction,
+                valid_trial, measurement_trial.valid_fraction,
+                measurement.valid_fraction,
+            )
 
-        step_accepted, step_rho, step_reason = controller.check_acceptance(
-            residual_before, trial_residual,
-            current_proposal.predicted_reduction,
-            valid_trial, measurement_trial.valid_fraction,
-            measurement.valid_fraction,
-        )
+            newly_accepted = step_accepted & needs_trial & ~accepted
+            accepted = accepted | newly_accepted
+            rho = torch.where(newly_accepted, step_rho, rho)
+            reject_reason = torch.where(newly_accepted & ~step_accepted, step_reason, reject_reason)
 
-        newly_accepted = step_accepted & needs_trial & ~accepted
-        accepted = accepted | newly_accepted
-        rho = torch.where(newly_accepted, step_rho, rho)
-        reject_reason = torch.where(newly_accepted & ~step_accepted, step_reason, reject_reason)
+            n_proposals_evaluated += needs_trial.sum().item()
 
-        n_proposals_evaluated += needs_trial.sum().item()
+            if accepted.all() or backtrack >= cfg.max_backtracks:
+                break
 
-        if accepted.all() or backtrack >= cfg.max_backtracks:
-            break
+            new_proposal, new_state = controller.apply_backtrack(current_proposal, current_state)
+            current_proposal = new_proposal
+            current_state = new_state
 
-        new_proposal, new_state = controller.apply_backtrack(current_proposal, current_state)
-        current_proposal = new_proposal
-        current_state = new_state
-
-    diag["backtracks"] = min(backtrack, cfg.max_backtracks)
-    diag["extra_forwards"] = n_proposals_evaluated
-    diag["accepted_proposal_count"] = int(accepted.sum().item())
+        diag["backtracks"] = min(backtrack, cfg.max_backtracks)
+        diag["extra_forwards"] = n_proposals_evaluated
+        diag["accepted_proposal_count"] = int(accepted.sum().item())
 
     # ---- Step 5: Select output ----
     if out_trial is None:
@@ -314,6 +328,10 @@ def apply_v7_step(
     current_state = controller.update_radius(
         current_state, rho, accepted, current_proposal.hit_boundary
     )
+    if cfg.band_order_bug:
+        current_state = controller.update_band_state(
+            current_state, residual_before, tolerance
+        )
 
     # ---- Step 7: Build diagnostics ----
     diag["noise_level"] = noise_level.mean().item()

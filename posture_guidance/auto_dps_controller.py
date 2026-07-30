@@ -38,6 +38,9 @@ class AutoDPSConfig:
     band_hysteresis: float = 1.5
     min_valid_fraction: float = 0.8
     trace: bool = True
+    disable_band_stop: bool = False
+    disable_trial: bool = False
+    band_order_bug: bool = False
 
 
 # ---- State ----
@@ -170,7 +173,8 @@ class TrustRegionAutoDPSController:
         valid_proposal = valid_proposal & torch.isfinite(residual)
         valid_proposal = valid_proposal & torch.isfinite(g_sq_sum)
         valid_proposal = valid_proposal & (g_sq_sum > 1e-20)
-        valid_proposal = valid_proposal & ~state.in_band
+        if not self.config.disable_band_stop:
+            valid_proposal = valid_proposal & ~state.in_band
         valid_proposal = valid_proposal & (radius_rms > 0)
         valid_proposal = valid_proposal & torch.isfinite(predicted_reduction)
         valid_proposal = valid_proposal & (predicted_reduction > 0)
