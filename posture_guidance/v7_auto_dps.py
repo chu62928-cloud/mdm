@@ -135,9 +135,18 @@ def apply_v7_step(
         "predicted_residual_deg": None, "trial_residual_deg": None,
         "merit_trial": None,
         "pred_reduction": None, "actual_reduction": None, "rho": None,
-        "backtracks": 0, "accepted": False, "in_band": False,
+        "backtracks": 0, "accepted": False, "in_control_band": False,
         "reject_reason": None, "valid_fraction": None, "active_count": None,
         "extra_forwards": 0,
+        # ---- V7.2 three-band trace fields ----
+        "control_tolerance_deg": None,
+        "evaluation_tolerance_deg": None,
+        "hysteresis_exit_deg": None,
+        "in_control_band_before": False,
+        "in_control_band_after": False,
+        "control_stop_triggered": False,
+        "reactivation_triggered": False,
+        "distance_to_target_deg": None,
         # ---- R3 extended ----
         "schedule_active": True,
         "proposal_valid": False, "proposal_skip_reason": "",
@@ -180,15 +189,28 @@ def apply_v7_step(
     diag["measurement_valid"] = valid_measurement.any().item()
 
     # ---- FIX (Branch C): Update band state BEFORE proposal ----
-    # Previously this was at Step 6 (after proposal), causing stale in_band
+    # Previously this was at Step 6 (after proposal), causing stale in_control_band
     # to block proposals even when residual had drifted out of tolerance.
     if not cfg.band_order_bug:
-        was_in_band = controller_state.in_band.clone()
-        controller_state = controller.update_band_state(
-            controller_state, residual_before, measurement.tolerance
+        was_in_control = controller_state.in_control_band.clone()
+        # V7.2: use three-band logic with separate control/evaluation/hysteresis
+        residual_deg = residual_before * rad_to_deg
+        controller_state = controller.update_control_state(
+            state=controller_state,
+            residual_deg=residual_deg,
+            control_tolerance_deg=cfg.control_tolerance_deg,
+            hysteresis_exit_deg=cfg.hysteresis_exit_deg,
         )
-        diag["band_just_entered"] = (controller_state.in_band & ~was_in_band).any().item()
-        diag["band_just_exited"] = (~controller_state.in_band & was_in_band).any().item()
+        diag["band_just_entered"] = (controller_state.in_control_band & ~was_in_control).any().item()
+        diag["band_just_exited"] = (~controller_state.in_control_band & was_in_control).any().item()
+        diag["in_control_band_before"] = was_in_control.any().item()
+        diag["in_control_band_after"] = controller_state.in_control_band.any().item()
+        diag["control_stop_triggered"] = (~was_in_control & controller_state.in_control_band).any().item()
+        diag["reactivation_triggered"] = (was_in_control & ~controller_state.in_control_band).any().item()
+        diag["control_tolerance_deg"] = cfg.control_tolerance_deg
+        diag["evaluation_tolerance_deg"] = cfg.evaluation_tolerance_deg
+        diag["hysteresis_exit_deg"] = cfg.hysteresis_exit_deg
+        diag["distance_to_target_deg"] = residual_deg[valid_measurement].mean().item() if valid_measurement.any() else None
 
     if not valid_measurement.any():
         diag["proposal_skip_reason"] = "measurement_invalid"
@@ -230,8 +252,8 @@ def apply_v7_step(
         skip_reasons = []
         if not valid_measurement.any():
             skip_reasons.append("measurement_invalid")
-        if controller_state.in_band.any():
-            skip_reasons.append("in_band")
+        if controller_state.in_control_band.any():
+            skip_reasons.append("in_control_band")
         if diag.get("gradient_floor_triggered", False):
             skip_reasons.append("gradient_floor")
         diag["proposal_skip_reason"] = "+".join(skip_reasons) if skip_reasons else "proposal_invalid"
@@ -329,8 +351,12 @@ def apply_v7_step(
         current_state, rho, accepted, current_proposal.hit_boundary
     )
     if cfg.band_order_bug:
-        current_state = controller.update_band_state(
-            current_state, residual_before, tolerance
+        residual_deg_bug = residual_before * rad_to_deg
+        current_state = controller.update_control_state(
+            state=current_state,
+            residual_deg=residual_deg_bug,
+            control_tolerance_deg=cfg.control_tolerance_deg,
+            hysteresis_exit_deg=cfg.hysteresis_exit_deg,
         )
 
     # ---- Step 7: Build diagnostics ----
@@ -357,7 +383,7 @@ def apply_v7_step(
         actual_red = (0.5 * residual_before[accepted]**2 - 0.5 * trial_residual[accepted]**2)
         diag["actual_reduction"] = actual_red.mean().item()
     diag["accepted"] = accepted.float().mean().item() > 0.5
-    diag["in_band"] = current_state.in_band.float().mean().item() > 0.5
+    diag["in_control_band"] = current_state.in_control_band.float().mean().item() > 0.5
     if not accepted.all():
         diag["reject_reason"] = int(reject_reason[~accepted].float().mean().item()) if (~accepted).any() else 0
 

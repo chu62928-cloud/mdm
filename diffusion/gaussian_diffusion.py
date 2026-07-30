@@ -855,7 +855,7 @@ class GaussianDiffusion:
             bt = diag.get('backtracks', 0)
             band = diag.get('in_band', False)
             print(
-                f'[V7 t={i:3d}] r_before={r_bef:+.1f}deg '
+                f'[V7 t={i:3d}] r_before={r_bef:+.1f}deg ctol={_V7_CFG.control_tolerance_deg:.1f} '
                 f'delta_rms={d_rms:.4f} rho={rho_v:.2f} '
                 f'accepted={acc} bt={bt} band={band}',
                 flush=True,

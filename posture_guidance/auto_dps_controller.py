@@ -41,15 +41,36 @@ class AutoDPSConfig:
     disable_band_stop: bool = False
     disable_trial: bool = False
     band_order_bug: bool = False
+    # ---- V7.2 three-band target redesign ----
+    control_tolerance_deg: float = 2.0
+    evaluation_tolerance_deg: float = 2.0
+    hysteresis_exit_deg: float = 3.0
+    soft_taper_enabled: bool = False
+    soft_taper_width_deg: float = 1.0
 
 
 # ---- State ----
+
+    def __post_init__(self):
+        if self.control_tolerance_deg <= 0:
+            raise ValueError(f"control_tolerance_deg must be > 0, got {self.control_tolerance_deg}")
+        if self.control_tolerance_deg > self.evaluation_tolerance_deg:
+            raise ValueError(
+                f"control_tolerance_deg ({self.control_tolerance_deg}) must be <= "
+                f"evaluation_tolerance_deg ({self.evaluation_tolerance_deg})"
+            )
+        if self.evaluation_tolerance_deg >= self.hysteresis_exit_deg:
+            raise ValueError(
+                f"evaluation_tolerance_deg ({self.evaluation_tolerance_deg}) must be < "
+                f"hysteresis_exit_deg ({self.hysteresis_exit_deg})"
+            )
+
 
 @dataclass
 class AutoDPSState:
     """Per-sample controller state. Reset at start of each trajectory (t=T-1)."""
     radius_scale: torch.Tensor    # (B,) current trust-radius multiplier
-    in_band: torch.Tensor         # (B,) bool — is this sample in target band?
+    in_control_band: torch.Tensor  # (B,) bool — is this sample in target band?
     accepted_steps: torch.Tensor  # (B,) cumulative accepted step count
     rejected_steps: torch.Tensor  # (B,) cumulative rejected step count
     total_backtracks: torch.Tensor  # (B,) cumulative backtrack count
@@ -92,7 +113,7 @@ class TrustRegionAutoDPSController:
         """Reset state at start of a new sampling trajectory (t == T-1)."""
         return AutoDPSState(
             radius_scale=torch.ones(batch_size, device=device, dtype=torch.float32),
-            in_band=torch.zeros(batch_size, device=device, dtype=torch.bool),
+            in_control_band=torch.zeros(batch_size, device=device, dtype=torch.bool),
             accepted_steps=torch.zeros(batch_size, device=device, dtype=torch.int32),
             rejected_steps=torch.zeros(batch_size, device=device, dtype=torch.int32),
             total_backtracks=torch.zeros(batch_size, device=device, dtype=torch.int32),
@@ -174,7 +195,7 @@ class TrustRegionAutoDPSController:
         valid_proposal = valid_proposal & torch.isfinite(g_sq_sum)
         valid_proposal = valid_proposal & (g_sq_sum > 1e-20)
         if not self.config.disable_band_stop:
-            valid_proposal = valid_proposal & ~state.in_band
+            valid_proposal = valid_proposal & ~state.in_control_band
         valid_proposal = valid_proposal & (radius_rms > 0)
         valid_proposal = valid_proposal & torch.isfinite(predicted_reduction)
         valid_proposal = valid_proposal & (predicted_reduction > 0)
@@ -351,7 +372,7 @@ class TrustRegionAutoDPSController:
 
         return AutoDPSState(
             radius_scale=new_radius_scale,
-            in_band=state.in_band,
+            in_control_band=state.in_control_band,
             accepted_steps=new_accepted,
             rejected_steps=new_rejected,
             total_backtracks=state.total_backtracks,
@@ -403,7 +424,7 @@ class TrustRegionAutoDPSController:
 
         new_state = AutoDPSState(
             radius_scale=new_radius_scale.to(torch.float32),
-            in_band=state.in_band,
+            in_control_band=state.in_control_band,
             accepted_steps=state.accepted_steps,
             rejected_steps=state.rejected_steps,
             total_backtracks=new_total_backtracks,
@@ -415,12 +436,65 @@ class TrustRegionAutoDPSController:
     # Band hysteresis (Section 10 of algorithm spec)
     # ----------------------------------------------------------------
 
+    def update_control_state(
+        self,
+        state: AutoDPSState,
+        residual_deg: torch.Tensor,       # (B,) in degrees
+        control_tolerance_deg: float,
+        hysteresis_exit_deg: float,
+    ) -> AutoDPSState:
+        """V7.2: Update in_control_band status with three-band hysteresis.
+
+        Enter control band:  |r| <= control_tolerance
+        Leave control band:  |r| > hysteresis_exit
+        In between:          state unchanged (hysteresis)
+
+        Unlike V7.1, evaluation tolerance is SEPARATE from control tolerance.
+        This function only manages the control-band state machine.
+
+        Backward compat: when control_tolerance_deg == evaluation_tolerance_deg == 2.0
+        and hysteresis_exit_deg == 2.0 * band_hysteresis (3.0), behavior matches V7.1.
+        """
+        abs_r = residual_deg.abs()
+
+        new_in_band = state.in_control_band.clone()
+
+        # Enter control band
+        enter = (abs_r <= control_tolerance_deg) & ~new_in_band
+        new_in_band = new_in_band | enter
+
+        # Leave control band (wider threshold)
+        leave = (abs_r > hysteresis_exit_deg) & new_in_band
+        new_in_band = new_in_band & ~leave
+
+        return AutoDPSState(
+            radius_scale=state.radius_scale,
+            in_control_band=new_in_band,
+            accepted_steps=state.accepted_steps,
+            rejected_steps=state.rejected_steps,
+            total_backtracks=state.total_backtracks,
+        )
+
     def update_band_state(
         self,
         state: AutoDPSState,
-        residual: torch.Tensor,       # (B,)
-        tolerance: torch.Tensor,      # (B,)
+        residual: torch.Tensor,
+        tolerance: torch.Tensor,
     ) -> AutoDPSState:
+        """Legacy V7.1 interface — delegates to update_control_state with
+        control_tol = eval_tol = tolerance, hysteresis = tolerance * band_hysteresis.
+
+        Kept for backward compatibility only. V7.2 callers should use
+        update_control_state() directly.
+        """
+        tol_deg = tolerance.mean().item() * 180.0 / 3.141592653589793  # rad -> deg
+        exit_deg = tol_deg * self.config.band_hysteresis
+        return self.update_control_state(
+            state=state,
+            residual_deg=torch.rad2deg(residual),
+            control_tolerance_deg=tol_deg,
+            hysteresis_exit_deg=exit_deg,
+        )
         """Update in_band status with hysteresis.
 
         Enter band:  |r| <= tolerance
@@ -429,7 +503,7 @@ class TrustRegionAutoDPSController:
         cfg = self.config
         abs_r = residual.abs()
 
-        new_in_band = state.in_band.clone()
+        new_in_band = state.in_control_band.clone()
 
         # Enter band
         enter = (abs_r <= tolerance) & ~new_in_band
@@ -442,7 +516,7 @@ class TrustRegionAutoDPSController:
 
         return AutoDPSState(
             radius_scale=state.radius_scale,
-            in_band=new_in_band,
+            in_control_band=new_in_band,
             accepted_steps=state.accepted_steps,
             rejected_steps=state.rejected_steps,
             total_backtracks=state.total_backtracks,

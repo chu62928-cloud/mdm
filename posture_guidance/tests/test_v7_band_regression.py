@@ -40,7 +40,7 @@ def test_enter_band(ctrl):
     state = ctrl.reset(B, "cpu", torch.float32)
     r = torch.tensor([0.02, 0.01, 0.03, 0.005, 0.015, 0.034])
     state = ctrl.update_band_state(state, r, torch.full((B,), tol))
-    assert state.in_band.all(), f"All samples should enter band, got {state.in_band}"
+    assert state.in_control_band.all(), f"All samples should enter band, got {state.in_control_band}"
 
 
 # ---- Test 2: Hysteresis exit on |r| > 1.5*tol ----
@@ -53,7 +53,7 @@ def test_hysteresis_exit(ctrl):
     state = ctrl.update_band_state(state,
         torch.tensor([0.02, 0.01, 0.03, 0.005, 0.015, 0.034]),
         torch.full((B,), tol))
-    assert state.in_band.all()
+    assert state.in_control_band.all()
 
     # Now test exits: 0.06 and 0.07 > 1.5*0.035=0.0525
     state = ctrl.update_band_state(state,
@@ -61,8 +61,8 @@ def test_hysteresis_exit(ctrl):
         torch.full((B,), tol))
     # Expected: 0 out, 1 in, 2 in (hysteresis), 3 out, 4 in, 5 out
     expected = [False, True, True, False, True, False]
-    assert state.in_band.tolist() == expected, \
-        f"Hysteresis exit wrong: expected {expected}, got {state.in_band.tolist()}"
+    assert state.in_control_band.tolist() == expected, \
+        f"Hysteresis exit wrong: expected {expected}, got {state.in_control_band.tolist()}"
 
 
 # ---- Test 3: Re-entry after exit ----
@@ -75,7 +75,7 @@ def test_reentry_after_exit(ctrl):
     state = ctrl.update_band_state(state,
         torch.tensor([0.02, 0.01, 0.03, 0.02]),
         torch.full((B,), tol))
-    assert state.in_band.all()
+    assert state.in_control_band.all()
     # Exit
     state = ctrl.update_band_state(state,
         torch.tensor([0.06, 0.01, 0.08, 0.07]),
@@ -85,10 +85,10 @@ def test_reentry_after_exit(ctrl):
     state = ctrl.update_band_state(state,
         torch.tensor([0.01, 0.01, 0.08, 0.01]),
         torch.full((B,), tol))
-    assert state.in_band[0], "Sample 0 should re-enter band"
-    assert state.in_band[1], "Sample 1 should stay in band"
-    assert not state.in_band[2], "Sample 2 should stay out (0.08 > 1.5*tol)"
-    assert state.in_band[3], "Sample 3 should re-enter"
+    assert state.in_control_band[0], "Sample 0 should re-enter band"
+    assert state.in_control_band[1], "Sample 1 should stay in band"
+    assert not state.in_control_band[2], "Sample 2 should stay out (0.08 > 1.5*tol)"
+    assert state.in_control_band[3], "Sample 3 should re-enter"
 
 
 # ---- Test 4: Proposal is valid only for out-of-band samples ----
@@ -119,7 +119,7 @@ def test_proposal_gated_by_band(ctrl):
     prop = ctrl.propose(r, g, nl, tol_t, valid, state)
 
     for i in range(B):
-        if state.in_band[i]:
+        if state.in_control_band[i]:
             assert not prop.valid[i], f"Sample {i} in-band should get invalid proposal"
         else:
             assert prop.valid[i], f"Sample {i} out-of-band should get valid proposal"
@@ -140,13 +140,13 @@ def test_no_permanent_skip_after_exit(ctrl):
     # Timestep 1: enter band (|r| very small)
     state = ctrl.update_band_state(state,
         torch.tensor([-0.01, -0.005]), tol_t)
-    assert state.in_band.all(), "Both should enter band"
+    assert state.in_control_band.all(), "Both should enter band"
 
     # Timestep 2: posterior noise pushes sample 0 out (|r| > 1.5*tol)
     state = ctrl.update_band_state(state,
         torch.tensor([-0.06, -0.002]), tol_t)
-    assert not state.in_band[0], "Sample 0 should exit band"
-    assert state.in_band[1], "Sample 1 stays in band"
+    assert not state.in_control_band[0], "Sample 0 should exit band"
+    assert state.in_control_band[1], "Sample 1 stays in band"
 
     # Timestep 3: propose — sample 0 MUST get valid proposal
     r = torch.tensor([-0.06, -0.002])
@@ -171,17 +171,17 @@ def test_batch_independent_band(ctrl):
     # Sample 1, 3: |r| > tol (fresh entry, but not > 1.5*tol yet) — actually
     #   on first update, if |r| > tol they stay out.
     expected_in_band = [True, False, True, False]
-    assert state.in_band.tolist() == expected_in_band, \
-        f"Expected {expected_in_band}, got {state.in_band.tolist()}"
+    assert state.in_control_band.tolist() == expected_in_band, \
+        f"Expected {expected_in_band}, got {state.in_control_band.tolist()}"
 
     # Independence: modifying one sample's state must not affect others
     state2 = ctrl.update_band_state(state,
         torch.tensor([0.08, 0.01, 0.02, 0.01]),  # sample 0 exit, 1&3 enter, 2 stay
         torch.full((4,), tol))
-    assert not state2.in_band[0]
-    assert state2.in_band[1]
-    assert state2.in_band[2]
-    assert state2.in_band[3]
+    assert not state2.in_control_band[0]
+    assert state2.in_control_band[1]
+    assert state2.in_control_band[2]
+    assert state2.in_control_band[3]
 
 
 # ---- Test 7: Source code invariant — update_band_state BEFORE propose ----
@@ -203,14 +203,14 @@ def test_source_order_invariant():
     assert apply_start > 0, "apply_v7_step function not found"
 
     # Look for update_band_state and controller.propose after apply_v7_step start
-    band_pos = content.find("update_band_state", apply_start)
+    band_pos = content.find("update_control_state", apply_start)
     propose_pos = content.find("controller.propose(", apply_start)
 
     assert band_pos > 0, "update_band_state call not found in apply_v7_step"
     assert propose_pos > 0, "controller.propose call not found in apply_v7_step"
 
     assert band_pos < propose_pos, (
-        f"REGRESSION: update_band_state at byte {band_pos} must appear BEFORE "
+        f"REGRESSION: update_control_state at byte {band_pos} must appear BEFORE "
         f"controller.propose at byte {propose_pos}. This is the Branch C fix "
         f"(commit f414856) that prevents permanent proposal skipping after "
         f"band re-exit. If this test fails, the V7.0 bug has been reintroduced."

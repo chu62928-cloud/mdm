@@ -170,7 +170,7 @@ def test_batch_independence(ctrl):
 
     state = ctrl.reset(B, device, dtype)
     # Set sample 0 as in-band
-    state.in_band[0] = True
+    state.in_control_band[0] = True
 
     nl = torch.full((B,), 0.3)
     prop = ctrl.propose(r, g, nl, tol, valid, state)
@@ -227,22 +227,22 @@ def test_band_hysteresis(ctrl):
     tol = torch.tensor([0.035])  # ~2 deg
 
     # Initially not in band
-    assert not state.in_band[0]
+    assert not state.in_control_band[0]
 
     # Residual within tolerance → enter band
     r_small = torch.tensor([0.01])
     state = ctrl.update_band_state(state, r_small, tol)
-    assert state.in_band[0], "Should enter band"
+    assert state.in_control_band[0], "Should enter band"
 
     # Residual slightly above tolerance but below hysteresis → stay in band
     r_medium = torch.tensor([0.04])  # > 0.035 but < 1.5*0.035 = 0.0525
     state = ctrl.update_band_state(state, r_medium, tol)
-    assert state.in_band[0], "Should stay in band below hysteresis threshold"
+    assert state.in_control_band[0], "Should stay in band below hysteresis threshold"
 
     # Residual above hysteresis threshold → leave band
     r_large = torch.tensor([0.06])  # > 1.5 * 0.035 = 0.0525
     state = ctrl.update_band_state(state, r_large, tol)
-    assert not state.in_band[0], "Should leave band above hysteresis threshold"
+    assert not state.in_control_band[0], "Should leave band above hysteresis threshold"
 
 
 # ---- Test 7: NaN and Inf safety ----
