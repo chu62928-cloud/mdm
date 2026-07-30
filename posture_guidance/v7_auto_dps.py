@@ -1,19 +1,15 @@
 """
-V7 Auto-DPS Single-Step Algorithm.
+V7 Auto-DPS Single-Step Algorithm (V7.1 — extended R3 trace diagnostics).
 
 Connects MDM forward/backward, constraint measurement, and the
 trust-region controller into a single-step interface used by the sampler.
 
-Design (from revised execution plan Section 2-3):
-  - Trial in x_t space → accepted = use full out_trial posterior
-  - predict_fn closure calls p_mean_variance() — no replicated MDM logic
-  - Frozen masks across trials within same timestep
-  - Per-sample independent accept/reject
-  - Returns selected_out dict + diagnostics dict
+R3 trace fields (Phase 0): schedule_active, proposal_valid, proposal_skip_reason,
+  measurement_valid, gradient_floor_triggered, clip_factor, boundary_hit,
+  proposal_count, accepted_proposal_count, remaining_active_steps
 """
 
-import math
-import time
+import math, json, os, time
 import torch
 from typing import Callable, Optional
 
@@ -29,11 +25,6 @@ from .auto_dps_controller import (
 
 
 def _check_schedule(t_int: int, T_total: int, schedule: str) -> bool:
-    """Check if guidance is active at this timestep.
-
-    schedule="second_half": active when t < T/2 (earlier steps, more noise)
-    schedule="always": always active
-    """
     if schedule == "always":
         return True
     if schedule == "second_half":
@@ -45,19 +36,19 @@ def _check_schedule(t_int: int, T_total: int, schedule: str) -> bool:
     return True
 
 
+def _count_remaining_steps(t_int: int, T_total: int, schedule: str) -> int:
+    """Count remaining schedule-active diffusion steps."""
+    n = 0
+    for tt in range(t_int - 1, -1, -1):
+        if _check_schedule(tt, T_total, schedule):
+            n += 1
+    return n
+
+
 def compute_constraint_jacobian(
-    x_t: torch.Tensor,                # (B, C, 1, T) with requires_grad
-    residual_sum: torch.Tensor,       # scalar
+    x_t: torch.Tensor,
+    residual_sum: torch.Tensor,
 ) -> torch.Tensor:
-    """Compute Jacobian of residual sum w.r.t x_t.
-
-    Args:
-        x_t: noisy latent with requires_grad=True.
-        residual_sum: scalar = measurement.summary_residual.sum().
-
-    Returns:
-        grad: (B, C, 1, T) gradient tensor.
-    """
     grad = torch.autograd.grad(
         outputs=residual_sum,
         inputs=x_t,
@@ -67,86 +58,108 @@ def compute_constraint_jacobian(
     return grad
 
 
+# ---- Per-seed JSONL trace writer ----
+
+_TRACE_DIR = None
+_TRACE_SEED = None
+_TRACE_FILE = None
+
+def init_trace(run_dir: str, seed: int):
+    """Initialize JSONL trace writer for a new sampling trajectory."""
+    global _TRACE_DIR, _TRACE_SEED, _TRACE_FILE
+    _TRACE_DIR = run_dir
+    _TRACE_SEED = seed
+    os.makedirs(run_dir, exist_ok=True)
+    trace_path = os.path.join(run_dir, "v7_trace.jsonl")
+    _TRACE_FILE = open(trace_path, "w")
+    return trace_path
+
+
+def write_trace(diag: dict, seed: int):
+    """Write one timestep's diagnostics to JSONL."""
+    global _TRACE_FILE
+    if _TRACE_FILE is None:
+        return
+    record = {"seed": seed}
+    for k, v in diag.items():
+        if isinstance(v, torch.Tensor):
+            record[k] = v.item() if v.numel() == 1 else v.tolist()
+        elif isinstance(v, (int, float, bool, str, type(None))):
+            record[k] = v
+        else:
+            record[k] = str(v)
+    _TRACE_FILE.write(json.dumps(record) + "\n")
+    _TRACE_FILE.flush()
+
+
+def close_trace():
+    global _TRACE_FILE
+    if _TRACE_FILE is not None:
+        _TRACE_FILE.close()
+        _TRACE_FILE = None
+
+
 def apply_v7_step(
     *,
-    x_t: torch.Tensor,                         # (B, C, 1, T)
+    x_t: torch.Tensor,
     t_int: int,
-    t_tensor: torch.Tensor,                    # (B,) long
+    t_tensor: torch.Tensor,
     T_total: int,
-    predict_fn: Callable,                      # x -> dict with mean, variance, log_variance, pred_xstart
-    fk_fn: Callable,                           # x0 -> q
-    guidance,                                   # PostureGuidance with is_primary spec
+    predict_fn: Callable,
+    fk_fn: Callable,
+    guidance,
     controller: TrustRegionAutoDPSController,
     controller_state: AutoDPSState,
-    noise_level: torch.Tensor,                 # (B,) sqrt(1 - alpha_bar_t)
+    noise_level: torch.Tensor,
     config: AutoDPSConfig = None,
+    trace_seed: int = None,
 ) -> tuple[dict, dict, AutoDPSState]:
-    """Execute one V7 Auto-DPS step.
-
-    Args:
-        x_t: Current noisy latent (B, C, 1, T).
-        t_int: Integer timestep index.
-        t_tensor: Long tensor (B,).
-        T_total: Total diffusion timesteps.
-        predict_fn: Closure calling p_mean_variance(model, x, t, ...).
-        fk_fn: Forward kinematics function (x0_pred -> joint coords).
-        guidance: PostureGuidance instance.
-        controller: TrustRegionAutoDPSController instance.
-        controller_state: Current per-sample state.
-        noise_level: (B,) current diffusion noise level.
-        config: AutoDPSConfig (uses controller.config if None).
-
-    Returns:
-        (selected_out, diagnostics, new_controller_state)
-        selected_out: dict with mean, variance, log_variance, pred_xstart.
-        diagnostics: dict with per-timestep trace data.
-    """
     cfg = config or controller.config
     B, C, _, T_frames = x_t.shape
     device = x_t.device
     dtype = x_t.dtype
 
+    rad_to_deg = 180.0 / math.pi
+    eps = 1e-12
+
+    # ---- Extended diagnostics (R3 fields) ----
     diag = {
         "t": t_int,
         "noise_level": None,
-        "value_before_deg": None,
-        "target_deg": None,
-        "residual_before_deg": None,
-        "tolerance_deg": None,
+        "value_before_deg": None, "target_deg": None,
+        "residual_before_deg": None, "tolerance_deg": None,
         "merit_before": None,
-        "grad_rms": None,
-        "g_sq_sum": None,
-        "delta_raw_rms": None,
-        "radius_rms": None,
-        "delta_rms": None,
+        "grad_rms": None, "g_sq_sum": None,
+        "delta_raw_rms": None, "radius_rms": None, "delta_rms": None,
         "hit_boundary": None,
-        "predicted_residual_deg": None,
-        "trial_residual_deg": None,
+        "predicted_residual_deg": None, "trial_residual_deg": None,
         "merit_trial": None,
-        "pred_reduction": None,
-        "actual_reduction": None,
-        "rho": None,
-        "backtracks": 0,
-        "accepted": False,
-        "in_band": False,
-        "reject_reason": None,
-        "valid_fraction": None,
-        "active_count": None,
+        "pred_reduction": None, "actual_reduction": None, "rho": None,
+        "backtracks": 0, "accepted": False, "in_band": False,
+        "reject_reason": None, "valid_fraction": None, "active_count": None,
         "extra_forwards": 0,
+        # ---- R3 extended ----
+        "schedule_active": True,
+        "proposal_valid": False, "proposal_skip_reason": "",
+        "measurement_valid": False, "gradient_floor_triggered": False,
+        "clip_factor": None, "boundary_hit": False,
+        "proposal_count": 0, "accepted_proposal_count": 0,
+        "remaining_active_steps": None, "radius_scale_value": None,
     }
 
-    # ----------------------------------------------------------------
-    # Step 0: Schedule check
-    # ----------------------------------------------------------------
+    # ---- Step 0: Schedule check ----
+    diag["remaining_active_steps"] = _count_remaining_steps(t_int, T_total, cfg.schedule)
+
     if not _check_schedule(t_int, T_total, cfg.schedule):
-        # Not active — return current posterior unchanged
+        diag["schedule_active"] = False
+        diag["proposal_skip_reason"] = "schedule_inactive"
         with torch.no_grad():
             out_current = predict_fn(x_t)
+        if trace_seed is not None:
+            write_trace(diag, trace_seed)
         return {k: v.detach() for k, v in out_current.items()}, diag, controller_state
 
-    # ----------------------------------------------------------------
-    # Step 1: Current state measurement (with grad for Jacobian)
-    # ----------------------------------------------------------------
+    # ---- Step 1: Current state measurement ----
     x_t_work = x_t.detach().requires_grad_(True)
     out_current = predict_fn(x_t_work)
     x0_current = out_current["pred_xstart"]
@@ -154,37 +167,75 @@ def apply_v7_step(
 
     measurement = guidance.measure_primary_constraint(q_current, t_int, T_total)
 
-    # Freeze masks for all trials in this timestep
     frozen_active_mask = measurement.active_mask.detach().clone()
     frozen_valid_mask = measurement.valid_mask.detach().clone()
 
-    residual_before = measurement.summary_residual                   # (B,)
-    merit_before = measurement.merit                                # (B,)
+    residual_before = measurement.summary_residual
+    merit_before = measurement.merit
 
-    # Check per-sample validity
     valid_measurement = (
         torch.isfinite(residual_before)
         & (measurement.effective_count > 0)
     )
+    diag["measurement_valid"] = valid_measurement.any().item()
 
-    # ----------------------------------------------------------------
-    # Step 2: Compute Jacobian
-    # ----------------------------------------------------------------
-    r_sum = residual_before.sum()  # scalar — only uses valid samples
+    # ---- FIX (Branch C): Update band state BEFORE proposal ----
+    # Previously this was at Step 6 (after proposal), causing stale in_band
+    # to block proposals even when residual had drifted out of tolerance.
+    was_in_band = controller_state.in_band.clone()
+    controller_state = controller.update_band_state(
+        controller_state, residual_before, measurement.tolerance
+    )
+    diag["band_just_entered"] = (controller_state.in_band & ~was_in_band).any().item()
+    diag["band_just_exited"] = (~controller_state.in_band & was_in_band).any().item()
+
+    if not valid_measurement.any():
+        diag["proposal_skip_reason"] = "measurement_invalid"
+        if trace_seed is not None:
+            write_trace(diag, trace_seed)
+        with torch.no_grad():
+            out_detached = predict_fn(x_t.detach())
+        return {k: v.detach() for k, v in out_detached.items()}, diag, controller_state
+
+    # ---- Step 2: Jacobian ----
+    r_sum = residual_before.sum()
     grad = compute_constraint_jacobian(x_t_work, r_sum)
 
-    # ----------------------------------------------------------------
-    # Step 3: Controller proposes delta
-    # ----------------------------------------------------------------
+    # R3: gradient floor check
+    grad_flat = grad.flatten(start_dim=1)
+    g_sq_per_sample = (grad_flat ** 2).sum(dim=1)
+    diag["gradient_floor_triggered"] = (g_sq_per_sample <= 1e-20).any().item()
+
+    # ---- Step 3: Controller proposal ----
     tolerance = measurement.tolerance
     proposal = controller.propose(
         residual_before, grad, noise_level.to(device),
         tolerance, valid_measurement, controller_state,
     )
 
-    # ----------------------------------------------------------------
-    # Step 4: Trial evaluation loop (with backtracking)
-    # ----------------------------------------------------------------
+    # R3: proposal-level diagnostics
+    diag["proposal_valid"] = proposal.valid.any().item()
+    diag["proposal_count"] = int(proposal.valid.sum().item())
+    diag["boundary_hit"] = proposal.hit_boundary.any().item()
+    diag["radius_scale_value"] = controller_state.radius_scale.mean().item()
+
+    if proposal.valid.any():
+        raw_rms = proposal.delta_raw[proposal.valid].flatten(1).pow(2).mean(1).sqrt()
+        clipped_rms = proposal.delta[proposal.valid].flatten(1).pow(2).mean(1).sqrt()
+        cf = (clipped_rms / (raw_rms + eps)).mean().item()
+        diag["clip_factor"] = cf
+
+    if not proposal.valid.any():
+        skip_reasons = []
+        if not valid_measurement.any():
+            skip_reasons.append("measurement_invalid")
+        if controller_state.in_band.any():
+            skip_reasons.append("in_band")
+        if diag.get("gradient_floor_triggered", False):
+            skip_reasons.append("gradient_floor")
+        diag["proposal_skip_reason"] = "+".join(skip_reasons) if skip_reasons else "proposal_invalid"
+
+    # ---- Step 4: Trial evaluation loop ----
     accepted = torch.zeros(B, device=device, dtype=torch.bool)
     rho = torch.zeros(B, device=device, dtype=torch.float32)
     reject_reason = torch.zeros(B, device=device, dtype=torch.int32)
@@ -192,25 +243,20 @@ def apply_v7_step(
     current_proposal = proposal
     current_state = controller_state
     trial_residual = residual_before.clone()
+    n_proposals_evaluated = 0
 
     for backtrack in range(cfg.max_backtracks + 1):
-        # Check if any sample still needs evaluation
         needs_trial = current_proposal.valid & ~accepted
         if not needs_trial.any():
             break
 
-        # Only evaluate samples that need it
-        # Build trial x_t
         x_t_trial = x_t.detach() + current_proposal.delta
-        # Apply delta only for valid samples (others unchanged)
         trial_mask = needs_trial.view(B, 1, 1, 1)
         x_t_trial = torch.where(trial_mask, x_t_trial, x_t.detach())
 
-        # Trial forward (no grad)
         with torch.no_grad():
             out_trial = predict_fn(x_t_trial)
             q_trial = fk_fn(out_trial["pred_xstart"])
-            # Use FROZEN masks
             measurement_trial = guidance.measure_primary_constraint(
                 q_trial, t_int, T_total,
                 frozen_active_mask=frozen_active_mask,
@@ -223,48 +269,37 @@ def apply_v7_step(
             & (measurement_trial.effective_count > 0)
         )
 
-        # Accept/reject
         step_accepted, step_rho, step_reason = controller.check_acceptance(
-            residual_before,
-            trial_residual,
+            residual_before, trial_residual,
             current_proposal.predicted_reduction,
-            valid_trial,
-            measurement_trial.valid_fraction,
+            valid_trial, measurement_trial.valid_fraction,
             measurement.valid_fraction,
         )
 
-        # Only mark newly accepted samples
         newly_accepted = step_accepted & needs_trial & ~accepted
         accepted = accepted | newly_accepted
         rho = torch.where(newly_accepted, step_rho, rho)
         reject_reason = torch.where(newly_accepted & ~step_accepted, step_reason, reject_reason)
 
-        diag["extra_forwards"] += needs_trial.sum().item()
+        n_proposals_evaluated += needs_trial.sum().item()
 
         if accepted.all() or backtrack >= cfg.max_backtracks:
             break
 
-        # Backtrack: shrink radius for rejected samples
         new_proposal, new_state = controller.apply_backtrack(current_proposal, current_state)
         current_proposal = new_proposal
         current_state = new_state
 
     diag["backtracks"] = min(backtrack, cfg.max_backtracks)
+    diag["extra_forwards"] = n_proposals_evaluated
+    diag["accepted_proposal_count"] = int(accepted.sum().item())
 
-    # ----------------------------------------------------------------
-    # Step 5: Select output (accepted → trial, rejected → current)
-    # ----------------------------------------------------------------
-    # We need final trial output for accepted samples
-    if out_trial is not None and accepted.any():
-        # out_trial already computed in the last trial
-        pass
-    elif out_trial is None:
-        # No trial ever ran — use current
+    # ---- Step 5: Select output ----
+    if out_trial is None:
         with torch.no_grad():
             out_current_detached = predict_fn(x_t.detach())
         out_trial = {k: v.detach() for k, v in out_current_detached.items()}
 
-    # Build selected_out: per-sample mix of trial and current
     accepted_mask = accepted.view(B, 1, 1, 1)
     selected_out = {}
     out_current_detached = {k: v.detach() for k, v in out_current.items()}
@@ -275,23 +310,12 @@ def apply_v7_step(
                 accepted_mask, trial_val, out_current_detached[key]
             )
 
-    # ----------------------------------------------------------------
-    # Step 6: Update controller state
-    # ----------------------------------------------------------------
-    # Update radius
+    # ---- Step 6: Update controller state ----
     current_state = controller.update_radius(
         current_state, rho, accepted, current_proposal.hit_boundary
     )
-    # Update band state
-    # Use residual_before for band entry/exit check
-    current_state = controller.update_band_state(
-        current_state, residual_before, tolerance
-    )
 
-    # ----------------------------------------------------------------
-    # Step 7: Build diagnostics
-    # ----------------------------------------------------------------
-    rad_to_deg = 180.0 / math.pi
+    # ---- Step 7: Build diagnostics ----
     diag["noise_level"] = noise_level.mean().item()
     if valid_measurement.any():
         diag["value_before_deg"] = measurement.summary_value[valid_measurement].mean().item() * rad_to_deg
@@ -302,7 +326,7 @@ def apply_v7_step(
         diag["valid_fraction"] = measurement.valid_fraction[valid_measurement].mean().item()
         diag["active_count"] = measurement.effective_count[valid_measurement].mean().item()
     diag["grad_rms"] = grad.flatten(1).pow(2).mean(1).sqrt().mean().item()
-    diag["g_sq_sum"] = grad.flatten(1).pow(2).sum(1).mean().item()
+    diag["g_sq_sum"] = g_sq_per_sample.mean().item()
     diag["delta_raw_rms"] = proposal.delta_raw.flatten(1).pow(2).mean(1).sqrt().mean().item()
     diag["radius_rms"] = proposal.radius_rms.mean().item()
     diag["delta_rms"] = current_proposal.delta.flatten(1).pow(2).mean(1).sqrt().mean().item()
@@ -316,9 +340,12 @@ def apply_v7_step(
         diag["actual_reduction"] = actual_red.mean().item()
     diag["accepted"] = accepted.float().mean().item() > 0.5
     diag["in_band"] = current_state.in_band.float().mean().item() > 0.5
-    diag["reject_reason"] = reject_reason[~accepted].float().mean().item() if not accepted.all() else 0.0
+    if not accepted.all():
+        diag["reject_reason"] = int(reject_reason[~accepted].float().mean().item()) if (~accepted).any() else 0
 
-    # Clean up graph
+    # ---- Trace ----
+    if trace_seed is not None:
+        write_trace(diag, trace_seed)
+
     del x_t_work
-
     return selected_out, diag, current_state

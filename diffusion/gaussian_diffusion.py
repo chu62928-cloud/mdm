@@ -766,10 +766,13 @@ class GaussianDiffusion:
     ):
         """V7 Auto-DPS: replaces full posterior (mean, variance, log_variance, pred_xstart)."""
         import numpy as np
+        import os
         from posture_guidance.auto_dps_controller import (
             AutoDPSConfig, TrustRegionAutoDPSController,
         )
-        from posture_guidance.v7_auto_dps import apply_v7_step
+        from posture_guidance.v7_auto_dps import (
+            apply_v7_step, init_trace, write_trace, close_trace,
+        )
 
         global _V7_CTRL_STATE, _V7_CTRL, _V7_CFG
 
@@ -787,6 +790,16 @@ class GaussianDiffusion:
         # ---- Reset state at trajectory start ----
         if i == T_total - 1:
             _V7_CTRL_STATE = _V7_CTRL.reset(B, device, dtype)
+            trace_dir = os.environ.get("V7_TRACE_DIR", None)
+            if trace_dir:
+                seed_tag = os.environ.get("V7_TRACE_SEED", "0")
+                trace_path = init_trace(trace_dir, int(seed_tag))
+                print(f"[V7] Trace: {trace_path}", flush=True)
+            trace_dir = os.environ.get("V7_TRACE_DIR", None)
+            if trace_dir:
+                seed_tag = os.environ.get("V7_TRACE_SEED", "0")
+                trace_path = init_trace(trace_dir, int(seed_tag))
+                print(f"[V7] Trace: {trace_path}", flush=True)
 
         # ---- predict_fn closure ----
         def predict_fn(x_candidate):
@@ -802,13 +815,20 @@ class GaussianDiffusion:
         noise_level = th.full((B,), nl, device=device, dtype=th.float32)
 
         # ---- Execute V7 step ----
+        trace_seed = int(os.environ.get("V7_TRACE_SEED", "-1"))
+        trace_seed = trace_seed if trace_seed >= 0 else None
         selected_out, diag, _V7_CTRL_STATE = apply_v7_step(
             x_t=img, t_int=i, t_tensor=t, T_total=T_total,
             predict_fn=predict_fn, fk_fn=posture_fk_fn,
             guidance=guidance, controller=_V7_CTRL,
             controller_state=_V7_CTRL_STATE,
             noise_level=noise_level, config=_V7_CFG,
+            trace_seed=trace_seed,
         )
+
+        # Close trace on last step
+        if i == 0:
+            close_trace()
 
         # ---- Replace full posterior ----
         out["mean"] = selected_out["mean"]
