@@ -1,0 +1,40 @@
+{
+  "v2_config": {
+    "s": 40,
+    "schedule": "last_quarter"
+  },
+  "v6_config": {
+    "Kp": 80,
+    "Ki": 1,
+    "Kd": 5,
+    "s_min": 0.05,
+    "s_max": 50,
+    "I_max": 20,
+    "beta_ema": 0.8,
+    "lambda_smooth": 0.03,
+    "manifold_project": true,
+    "loss_form": "huber",
+    "huber_delta": 0.05,
+    "normalize_grad": false,
+    "band_gate": false,
+    "spec_schedule_override": "second_half"
+  },
+  "v7_1_config": {
+    "schedule": "second_half",
+    "max_backtracks": 3,
+    "max_radius_rms": 0.1
+  },
+  "v7_2_config": {
+    "schedule": "second_half",
+    "max_backtracks": 3,
+    "max_radius_rms": 0.1,
+    "control_tolerance_deg": 0.5,
+    "evaluation_tolerance_deg": 2.0,
+    "hysteresis_exit_deg": 3.0
+  },
+  "source_of_truth": "scripts/run_v7_2_validation.py (24-seed validation, commit f484416) -- the blind test config must match this exactly for all 4 methods.",
+  "known_deviation_fixed": {
+    "arm": "v6",
+    "description": "scripts/run_v7_2_blind.py originally used abbreviated V6 kwargs {Kp,Ki,Kd,s_min,s_max} only, omitting I_max/beta_ema/lambda_smooth/manifold_project/loss_form/huber_delta/normalize_grad/band_gate/spec_schedule_override. These silently fell back to _guidance_v6_closed_loop() code defaults (lambda_smooth=0.02 vs validated 0.03; spec_schedule_override='always' vs validated 'second_half'). Detected before scorecard generation; original v6 outputs preserved at tau*/v6_STALE_wrong_kwargs/ for audit; V6 arm rerun with corrected kwargs via scripts/run_v7_2_blind_v6fix.py (200/200 OK). V2/V7.1/V7.2 arms were unaffected (kwargs matched validation script from the start)."
+  }
+}

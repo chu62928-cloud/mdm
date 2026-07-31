@@ -1,0 +1,5 @@
+commit: f48441673b0f88636917fe99e6779212b9b3d8ae
+short: f484416
+note: this is the commit that was HEAD when the 800-run blind test (scripts/run_v7_2_blind.py)
+was launched, and remained HEAD (working tree clean, verified via git status --short) through
+completion and through the V6-arm fix rerun (scripts/run_v7_2_blind_v6fix.py).

@@ -1,0 +1,26 @@
+{
+  "primary": {
+    "cross_target_abs_error": "significantly lower for V7.2 vs V7.1 (paired bootstrap 95% CI excludes 0)",
+    "signed_bias_20_25": "pooled median (tau=20 and tau=25 combined) within [-0.75, +0.75] deg -- SAME statistic and threshold as Section 8.4 validation gate",
+    "frame_hit": "significantly higher for V7.2 vs V7.1 (paired bootstrap 95% CI excludes 0)"
+  },
+  "non_inferiority": {
+    "corr_drop": "<= 0.03 (V7.1 - V7.2, cross-target mean)",
+    "foot_skate_increase": "<= 0.01 (V7.2 - V7.1, cross-target mean)",
+    "failure_rate": "must not increase vs V7.1"
+  },
+  "statistics": {
+    "method": "paired bootstrap, seed as resampling unit",
+    "n_resamples": 10000,
+    "reporting": [
+      "mean",
+      "median",
+      "paired_difference",
+      "95%_CI",
+      "effect_size_cohend",
+      "per_seed_scatter",
+      "pareto_plot"
+    ]
+  },
+  "note": "Written into this file AFTER the blind run's raw comparison.npy files were already generated (see git_commit.txt for the timing caveat), but BEFORE any scorecard or bootstrap analysis was computed on the blind seeds. These criteria are copied verbatim from Section 9.4 of V7_2_Three_Band_Execution_Plan.md, which was authored and committed prior to launching the blind run."
+}
