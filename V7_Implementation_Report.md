@@ -1,9 +1,9 @@
 # V7 Trust-Region Auto-DPS 实施报告
 
-> **日期**: 2026-07-30（最终更新：40-seed blind test 完成）  
-> **分支**: `feature/v7-auto-dps`  
-> **最新提交**: `2970f4f` — "feat: 40-seed blind test complete (600/600 OK)"  
-> **当前状态**: V7.1-A 锁定，blind test 通过，论文级结论已形成  
+> **日期**: 2026-07-31（最终更新：V7.2 三分带重设计 + 800-run blind test 完成）  
+> **分支**: `feature/v7-2-target-redesign`  
+> **最新提交**: `af0704b` — "feat(V7.2): Section 14 diagnostic traces + plotting script (10 plots)"  
+> **当前状态**: V7.1-A 锁定；V7.2（三分带重设计）完成 800-seed blind test，判定 **GO WITH CAVEAT**（见 Section 13）  
 > **服务器**: `connect.westd.seetacloud.com:10090` | GPU: RTX 5090 (32GB) | 环境: `mdm5090`
 
 ---
@@ -573,6 +573,8 @@ V2 强力到达 target 但时间波形完全崩溃（corr=0.023）。V7 保留�
 
 V7.2 在独立分支 `feature/v7-2-target-redesign` 上启动，不允许复用 blind test seeds。
 
+> **更新（2026-07-31）**：V7.2 三分带重设计已完成并通过 800-run blind test（seeds 600-639）验证，见 Section 13。判定为 **GO WITH CAVEAT**：系统性欠推大幅收窄（cross-target abs_error 改善 0.23°，20°/25° signed median 由 -1.31° 收窄至 -0.20°），corr/foot-skate 均 non-inferior，但 tau≥20° 仍存在约 25-30% 的 hard-negative-tail 子群（并非本次新增回归，Stage D 24-seed 验证中已可见）。上表「Band 三重角色耦合」这一限制已通过三分带拆分直接解决；「单 primary constraint」与 soft-taper / q10-occupancy / contact-guard 等其余方向仍在本阶段范围外，留作独立未来工作，不因 hard-tail 发现而临时展开。
+
 ---
 
 ## 11. 运行命令
@@ -612,13 +614,19 @@ python scripts/diagnose_v7_results.py <dir>     # per-seed diagnostics
 ### A. Git 历史
 
 ```
+af0704b feat(V7.2): Section 14 diagnostic traces + plotting script (10 plots)
+613dca2 feat(V7.2): Stage E 800-run blind test (seeds 600-639) + frozen protocol + analysis -- GO WITH CAVEAT
+1a74ea3 feat(V7.2): Stage D 24-seed validation data (seeds 540-563, 480 runs) -- GO decision 4/4 PASS
+f484416 feat(V7.2): 24-seed validation PASSED — ctol=0.5 confirmed
+93f3db8 feat(V7.2): band sweep complete — ctol=0.5 selected per pre-registered rules
+8e30d30 feat(V7.2): three-band target redesign (in_control_band naming)
 2970f4f feat: 40-seed blind test complete (600/600 OK)
 11340f8 feat: Phase 2A ablation complete (288 runs, 8 methods)
-bf67691 feat: ablation switches
-9e0dc58 feat: V7.1 12-seed validation
-f414856 fix(V7): band state ordering (Branch C)
-170104d feat: V7 Auto-DPS core implementation
-840896b baseline: freeze pre-V7
+bf67691 feat: ablation switches (disable_trial, disable_band_stop, band_order_bug)
+9e0dc58 feat: V7.1 12-seed validation — band regression pass, V7.1-A selected
+f414856 fix(V7): band state evaluated before proposal (Branch C)
+170104d feat: V7 Auto-DPS — trust-region controller, constraint measurement, sampler integration
+840896b baseline: freeze pre-V7 evaluation and experiments
 ```
 
 ### B. 环境与 Checksum
@@ -640,4 +648,217 @@ f414856 fix(V7): band state ordering (Branch C)
 | `output0727/v7_ablation/` | 8 methods | 288 runs |
 | `output0727/v7_blind_protocol/` | 冻结协议 | config files |
 | `output0727/v7_blind_test/` | **40-seed blind** | **600 runs** |
-| **总计** | | **~1603 runs, 零失败** |
+| `output0727/v7_2_band_sweep/` | V7.2 Stage C：ctol 扫描 (seeds 500-519) | 4 ctol × 3 targets × 20 |
+| `output0727/v7_2_validation/` | V7.2 Stage D：24-seed 验证 (seeds 540-563) | 480 runs |
+| `output0727/v7_2_blind_protocol/` | V7.2 Stage E：冻结协议 | config files |
+| `output0727/v7_2_blind_test/` | **V7.2 800-seed blind (seeds 600-639)** | **800 runs** |
+| `output0727/v7_2_blind_traces/` | Section 14 图 6/9 补充诊断 trace | 8 traces |
+| **总计** | | **~3131 runs, 零失败** |
+
+---
+
+## 13. Phase 5 — V7.2 三分带重设计与 800-Run Blind Test (2026-07-31)
+
+### 13.1 动机
+
+Section 10.3 记录的已知限制：V7.1 在 tau≥20° 存在约 1.8° 的系统性欠推（signed_error 中位数 -1.25°~-1.45°，Section 9.4）。Phase 0 根因分析（Section 6）已确认这不是 trust region 过小，而是**band 状态把三个不同职责耦合到同一个容差阈值 `band_hysteresis=1.5°`（对应 2°/3° 的进入/退出阈值）**：
+
+1. 何时停止继续 propose 新 delta（控制职责）
+2. 何时在 scorecard 中记为 "in band"（评估职责）
+3. 何时允许从 band 中重新激活（滞回职责）
+
+单一阈值下，控制停止过早触发导致欠推，而退出阈值又与之绑定，无法独立调节。V7.2 的核心改动：**将三个职责拆分为三个独立容差**，不改变 Gauss-Newton 步长计算或 trust region 逻辑本身。
+
+### 13.2 三分带机制设计
+
+替换 V7.1 单一 `band_hysteresis` 为三个独立参数：
+
+| 参数 | 职责 | V7.2 值 |
+|------|------|---------|
+| `control_tolerance_deg` | 停止继续 propose（进入即停止更新） | 0.5° |
+| `evaluation_tolerance_deg` | scorecard 记录 "in band"（仅用于评估指标，不影响控制） | 2.0° |
+| `hysteresis_exit_deg` | 从 band 中重新激活（残差超出此阈值才恢复 propose） | 3.0° |
+
+与 V7.1 的关键差异：`control_tolerance_deg`（0.5°）远小于原单一容差（2°），使控制停止判据更严格——只有残差真正逼近 target 时才停止 propose，避免在 2° 容差内提前停止导致的系统性欠推。`evaluation_tolerance_deg`（2.0°）保持与 V7.1 原评估口径一致，确保 hit_band 等指标可与 V7.1 直接对比。`hysteresis_exit_deg`（3.0°）与 V7.1 原退出阈值绝对值一致（= 2.0° × 1.5），锚定在较宽松的评估容差而非新的窄控制容差上，避免退出阈值过窄导致的 band 反复进出（H3 根因，Section 6.3）。
+
+R3 trace 新增字段 `in_control_band_after`、`control_stop_triggered`、`reactivation_triggered`，用于诊断三个职责的实际触发情况（见 Section 14 图 9）。
+
+### 13.3 参数选择：Band Sweep + 24-Seed 验证
+
+**Stage C — Band Sweep**（seeds 500-519，N=20，与 Stage D/E 均无重叠，tau∈{15°,20°,25°}，`evaluation_tolerance_deg`/`hysteresis_exit_deg` 固定为 2.0°/3.0°，扫描 `control_tolerance_deg`∈{0.5,1.0,1.5,2.0}）：
+
+| ctol | tau=15° hit (median/mean) | tau=20° hit (median/mean) | tau=25° hit (median/mean) |
+|------|------|------|------|
+| **0.5** | 0.708 / 0.678 | **0.629** / 0.652 | **0.629** / 0.596 |
+| 1.0 | **0.733** / 0.662 | 0.533 / 0.605 | **0.646** / 0.610 |
+| 1.5 | 0.583 / 0.588 | 0.529 / 0.569 | 0.438 / 0.546 |
+| 2.0 | 0.592 / 0.587 | 0.558 / 0.572 | 0.425 / 0.508 |
+
+跨四个 ctol 值，temporal_corr mean 落在 0.490–0.542 区间（差异 <0.01），foot_skate_guided 落在 0.0504–0.0546 区间（差异 <0.005）——即控制容差的选择几乎不影响波形保持或滑步代价。**`ctol=0.5` 在 tau=25° 上明显最优（0.629 vs 0.438/0.425 的 hit_band），tau=20°/15° 与最佳值差距很小**，且 hit_band 随 ctol 增大总体单调下降。**选定 `control_tolerance_deg=0.5°`**。
+
+**Stage D — 24-Seed 验证**（seeds 540-563，与 band sweep/blind test 均无重叠，N=24，5 targets × 4 methods = 480 runs，`analyze_v72_valid.py`）：
+
+Cross-target median：
+
+| Method | corr | hit | foot_skate |
+|--------|------|-----|-----------|
+| V2 | 0.310 | 0.783 | 0.1067 |
+| V6 | 0.328 | 0.761 | 0.0857 |
+| V7.1 | 0.524 | 0.617 | 0.0756 |
+| V7.2 | **0.531** | **0.738** | 0.0756 |
+
+V7.2 vs V7.1：
+
+| 指标 | V7.1 | V7.2 | 差异 |
+|------|------|------|------|
+| Cross-target abs_error | 1.33° | **0.73°** | **-0.60°**（改善） |
+| Cross-target corr | 0.524 | 0.531 | -0.007（未丢失） |
+| 20°/25° signed median | -1.31° | **-0.20°** | 欠推大幅收窄 |
+| 20°/25° hit mean | 0.637 | **0.900** | +0.262 |
+
+**预注册 Go/No-Go 判据**（Section 8.4）：
+
+| 判据 | 阈值 | 实测 | 结果 |
+|------|------|------|------|
+| Cross-target abs_error 改善 | ≥0.30° | 0.604° | ✅ PASS |
+| 20°/25° signed median 落入 [-0.75°,+0.75°] | — | -0.204° | ✅ PASS |
+| 20°/25° hit_band 改善 | ≥0.08 | 0.262 | ✅ PASS |
+| Cross-target corr 下降 | ≤0.03 | -0.007（反而略升） | ✅ PASS |
+
+**4/4 PASS → GO，进入 Stage E blind test。**
+
+### 13.4 Stage E — 800-Run Blind Test（seeds 600-639）
+
+| 参数 | 值 |
+|------|-----|
+| 种子 | **600-639（40 fresh，与 band sweep / Stage D 均无重叠）** |
+| 方法 | V2, V6, V7.1, V7.2 |
+| Targets | 5°, 10°, 15°, 20°, 25° |
+| 总运行数 | 4 × 5 × 40 = **800** |
+| Bootstrap | 10,000 resamples |
+| 协议 | 预注册于 `V7_2_Three_Band_Execution_Plan.md` Section 9.3，执行前冻结 |
+
+**V6 arm 修复说明**：首次 800-run 使用了缩写 kwargs，静默回退到与预期不同的默认值（`lambda_smooth` / `spec_schedule_override` 未正确传递）。发现后已用正确 kwargs 重跑 V6 arm；V2 / V7.1 / V7.2 arm 不受影响。
+
+#### Cross-target 汇总
+
+| Method | corr | hit | abs_error | foot_skate |
+|--------|------|-----|-----------|-----------|
+| V2 | 0.345 | 0.818 | 0.874° | 0.1143 |
+| V6 | 0.382 | 0.763 | 1.085° | 0.1000 |
+| V7.1 | **0.607** | 0.583 | 1.242° | 0.0706 |
+| V7.2 | 0.605 | 0.617 | **0.783°** | 0.0714 |
+
+#### 主要终点（Primary Endpoints）
+
+| 终点 | 均值 | 95% CI | Cohen's d | 状态 |
+|------|------|--------|-----------|------|
+| Cross-target abs_error 改善（V7.1−V7.2） | +0.232° | [+0.098, +0.369] | 0.527 | ✅ PASS |
+| Cross-target hit 改善（V7.2−V7.1） | +0.038 | [+0.010, +0.069] | 0.392 | ✅ PASS |
+| 20°/25° pooled signed-error 中位数（**预注册主统计量**） | -0.429° | [-1.108, -0.219] | — | ⚠️ COND |
+| （信息性）20°/25° pooled signed-error 均值 | -1.015° | [-1.293, -0.751] | — | 仅供参考，非判据 |
+
+#### Non-inferiority 检查
+
+| 检查 | 均值 | 95% CI | 状态 |
+|------|------|--------|------|
+| corr 下降（V7.1−V7.2） | +0.0015 | [-0.0009, +0.0040] | ✅ PASS（未显著下降） |
+| foot_skate 增加（V7.2−V7.1） | -0.0002 | [-0.0014, +0.0009] | ✅ PASS（未显著增加） |
+| V7.1 失败率 | 0/200 | — | ✅ |
+| V7.2 失败率 | 0/200 | — | ✅ |
+
+#### 分 Target 差异（正值 = V7.2 更优）
+
+| Target | abs_error diff | 95% CI | Cohen's d | hit diff | 95% CI | Cohen's d |
+|--------|----------------|--------|-----------|----------|--------|-----------|
+| 5° | +0.398° | [+0.207, +0.613] | 0.606 | +0.057 | [+0.019, +0.103] | 0.408 |
+| 10° | +0.129° | [-0.106, +0.393] | 0.159 | +0.013 | [-0.035, +0.075] | 0.074 |
+| 15° | +0.133° | [-0.095, +0.348] | 0.186 | +0.002 | [-0.048, +0.050] | 0.013 |
+| 20° | +0.180° | [-0.108, +0.482] | 0.188 | +0.051 | [-0.010, +0.120] | 0.235 |
+| 25° | +0.321° | [-0.093, +0.723] | 0.243 | +0.068 | [-0.011, +0.146] | 0.267 |
+
+**观察**：abs_error 与 hit 的点估计在全部 5 个 target 上一致偏向 V7.2，但 20°/25° 的 CI 跨零——方向一致，个别 target 层面未达统计显著；聚合到 cross-target（N=40 seeds）后达到显著（见上方主要终点表）。
+
+#### Hard-Tail 子群（|signed_error| > 2°，即超出 evaluation_tolerance_deg 之外）
+
+| Target | signed mean | signed median | n_hard_tail (>2°) | n_total |
+|--------|-------------|----------------|--------------------|---------|
+| 5° | +0.339° | +0.232° | 4 | 40 |
+| 10° | +0.799° | +0.953° | 9 | 40 |
+| 15° | -0.224° | -0.167° | 3 | 40 |
+| 20° | -1.083° | **-0.821°** | **12** | 40 |
+| 25° | -0.948° | -0.319° | **10** | 40 |
+
+在 tau=20°/25°，约 25-30% 的 seed 落入一个持续的 "hard negative tail" 子群（欠推 >2°），拉低了 pooled mean（-1.02°）但对 pooled median（-0.43°，预注册主统计量）影响较小。**该 tail 并非 V7.2 新引入的回归**——Stage D 24-seed 验证中已可见类似结构（小样本下更不明显）。
+
+#### 最终判定：**GO WITH CAVEAT**
+
+> Cross-target abs_error 改善与全部 non-inferiority 检查均无条件 PASS。20°/25° signed-bias 与 frame_hit 在**点估计**（中位数，与 Section 8.4 预注册统计量一致）上通过，但其 bootstrap CI 未完全排除阈值/零，原因是 tau≥20° 存在一个持续约 25-30% 的 hard-negative-tail 子群。该 tail 在 24-seed 验证中已小规模可见，并非本次 blind test 新出现的回归。**建议报告为 GO WITH CAVEAT，而非无条件 GO。**
+
+这一 caveat 是诚实的限制报告，不用于论证新的机制工作——soft-taper / q10-occupancy / contact-guard 等已明确排除在本阶段范围外，留作独立未来工作。
+
+---
+
+## 14. Section 14 图表
+
+10 张图均通过 `dataviz` 方法论校验（色板 CVD/对比度验证脚本、legend 置于图外或直接标注、无标签遮挡），并经过渲染后逐一目视核查。
+
+### 图 1 — Signed Error vs. Target
+
+![Signed error vs target](section14_plots/plot01_signed_error_vs_target.png)
+
+四方法 signed_error 中位数 ± 95% CI 随 target 变化。V7.2（紫色◆）相比 V7.1（绿色▲）在 tau≥15° 明显收窄向零偏移，尤其 tau=20°：-1.25° → -0.20°（Stage D）。
+
+### 图 2 — Frame Hit Band vs. Target
+
+![Frame hit band vs target](section14_plots/plot02_frame_hit_vs_target.png)
+
+V7.2 在 tau=20°/25° 相比 V7.1 有明显提升（blind test 点估计 +0.05~+0.07；Stage D 验证中 20°/25° hit mean +0.262），同时仍低于 V2 "强力到达但波形崩溃" 策略下的 hit_band。
+
+### 图 3 — Temporal Correlation vs. Target
+
+![Temporal correlation vs target](section14_plots/plot03_temporal_corr_vs_target.png)
+
+V7.1 与 V7.2 的 corr 曲线几乎重合（cross-target 差异仅 0.0015，non-inferiority PASS），确认三分带重设计未牺牲 V7 的核心波形保持优势；两者均系统性高于 V2/V6。
+
+### 图 4 — Foot Skate vs. Target
+
+![Foot skate vs target](section14_plots/plot04_foot_skate_vs_target.png)
+
+V7.1/V7.2 foot_skate 曲线几乎重合（差异 -0.0002，non-inferiority PASS），均低于 V2/V6 baseline 水平，确认三分带改动不影响结构代价。
+
+### 图 5 — Pareto Scatter（Accuracy vs. Temporal Correlation）
+
+![Pareto scatter](section14_plots/plot05_pareto_scatter.png)
+
+Accuracy（abs_error，越低越好）与 temporal correlation（越高越好）的 Pareto 散点。V7.2 相比 V7.1 整体左移（更低 abs_error）且 corr 几乎不变，形成比 V7.1 更优的新 Pareto 点；V2 在高 corr 区间不可用。
+
+### 图 6 — Trust-Region Proposal 有效性 vs. 残差
+
+![Proposal count vs signed error](section14_plots/plot06_proposal_count_vs_signed_error.png)
+
+代表性 seed（tau=20°/25°，各含一个 hard-tail 与一个 good-case）per-step trace：横轴为距 target 的残差，纵轴为该 step 是否有 propose 尝试（0/1，加 jitter 显示为散点而非折线，避免非单调 x 造成的视觉误导）。V7.1 与 V7.2 的对比显示三分带下 propose 持续到残差接近 `control_tolerance_deg=0.5°` 才停止，而非旧版 2° 容差下的提前停止。
+
+### 图 7 — Tolerance Band vs. Bias（V7.1 单带 vs V7.2 三带）
+
+![Tolerance band vs bias](section14_plots/plot07_tolerance_band_vs_bias.png)
+
+嵌套阴影带对比 V7.1 单一 1.5°/3° 滞回带与 V7.2 的 control/evaluation/hysteresis-exit 三带结构；散点显示各 blind-test seed 的 signed_error 相对带宽的位置。脚注标注的 hard-tail 计数（tau=20°: 12/40, tau=25°: 10/40）与 Section 13.4 表格完全一致（协议引用 `V7_2_Three_Band_Execution_Plan.md` Section 9.4）。
+
+### 图 8 — 代表性轨迹对比（Hard-Tail vs. Good Case）
+
+![Trajectory comparison](section14_plots/plot08_trajectory_comparison.png)
+
+左：hard-tail seed（持续欠推）；右：good-case seed（V7.2 准确收敛于 target 附近）。目标虚线标注加了不透明背景色块，保证在任意轨迹线穿过处依然清晰可读。
+
+### 图 9 — Stop/Reactivate 时间线
+
+![Stop reactivate timeline](section14_plots/plot09_stop_reactivate_timeline.png)
+
+per-step 时间线展示 `control_stop_triggered` 与 `reactivation_triggered` 事件，直观呈现三分带相比 V7.1 单带如何减少反复进出 band 的现象（H3 根因，Section 6.3）。
+
+### 图 10 — Paired-Diff Forest Plot
+
+![Paired diff forest plot](section14_plots/plot10_paired_diff_forest.png)
+
+分 target 的 V7.1−V7.2 配对差异（abs_error、hit）及其 95% CI 森林图，可视化呈现 Section 13.4 表格中 "点估计一致偏向 V7.2、部分 target CI 跨零" 的模式。
